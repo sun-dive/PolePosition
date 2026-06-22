@@ -1,0 +1,66 @@
+:root {
+  --bg: #0d1117; --panel: #161b22; --line: #30363d; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; height: 100vh; display: flex; flex-direction: column;
+  background: var(--bg); color: var(--fg);
+  font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+.dim { color: var(--muted); }
+button { font: inherit; cursor: pointer; }
+.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; }
+.ghost:hover { border-color: var(--accent); color: var(--fg); }
+
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.brand { font-size: 15px; }
+.actions { display: flex; align-items: center; gap: 10px; }
+
+.meta { display: flex; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.title-in, .author-in { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 8px 10px; }
+.title-in { flex: 1 1 auto; font-weight: 600; }
+.author-in { flex: 0 0 220px; }
+
+.layout { flex: 1 1 auto; display: grid; grid-template-columns: 220px 1fr 1fr; min-height: 0; }
+.chapters, .editor, .preview { min-height: 0; display: flex; flex-direction: column; }
+.chapters { border-right: 1px solid var(--line); }
+.preview { border-left: 1px solid var(--line); }
+
+.chapters-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.chapter-list { list-style: none; margin: 0; padding: 6px; overflow: auto; }
+.chapter-list li { display: flex; align-items: center; gap: 4px; padding: 7px 8px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.chapter-list li:hover { background: #1c2230; }
+.chapter-list li.active { background: #1f6feb33; color: var(--fg); }
+.chapter-list .ci-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chapter-list .ci-btn { background: transparent; border: 0; color: var(--muted); padding: 0 4px; font-size: 13px; }
+.chapter-list .ci-btn:hover { color: var(--accent); }
+
+.editor { padding: 12px; }
+.chapter-title-in { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 8px 10px; font-weight: 600; margin-bottom: 8px; }
+.chapter-body { flex: 1 1 auto; resize: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 12px; font: 15px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chapter-body:focus, .title-in:focus, .author-in:focus, .chapter-title-in:focus { outline: none; border-color: var(--accent); }
+
+.ai { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.ai-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.ai-prompt { flex: 1 1 180px; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 7px 10px; }
+.ai-prompt:focus { outline: none; border-color: var(--accent); }
+.ai-btn { background: #1f6feb22; color: var(--accent); border: 1px solid #1f6feb55; border-radius: 8px; padding: 7px 10px; font-size: 13px; }
+.ai-btn:hover { background: #1f6feb33; }
+.ai-btn:disabled { opacity: .5; cursor: progress; }
+.ai-result { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.ai-result-text { margin: 0; padding: 10px 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-wrap: break-word; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg); }
+.ai-result-actions { display: flex; gap: 6px; align-items: center; padding: 8px; border-top: 1px solid var(--line); }
+
+.preview { padding: 12px; }
+.preview-head { padding: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.preview-body { flex: 1 1 auto; overflow: auto; padding-right: 6px; }
+.preview-body h1, .preview-body h2, .preview-body h3, .preview-body h4 { line-height: 1.25; }
+.preview-body a { color: var(--accent); }
+.preview-body hr { border: 0; border-top: 1px solid var(--line); }
+
+.statusbar { padding: 7px 16px; border-top: 1px solid var(--line); font-size: 12px; }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+  .chapters, .preview { border: 0; border-top: 1px solid var(--line); max-height: 220px; }
+}

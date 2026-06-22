@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pole Position — create your NFT</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🏁 <b>Pole&nbsp;Position</b> <span class="dim">— write it, illustrate it, mint it.</span></div>
+    <div class="actions">
+      <span id="wordcount" class="dim"></span>
+      <button id="btnImport" class="ghost" type="button">Import</button>
+      <button id="btnExport" class="ghost" type="button">Export draft</button>
+      <input id="importFile" type="file" accept="application/json" hidden />
+    </div>
+  </header>
+
+  <section class="meta">
+    <input id="bookTitle" class="title-in" placeholder="Book title" />
+    <input id="bookAuthor" class="author-in" placeholder="Author" />
+  </section>
+
+  <main class="layout">
+    <aside class="chapters">
+      <div class="chapters-head"><span>Chapters</span><button id="btnAddChapter" class="ghost" type="button">+ Add</button></div>
+      <ol id="chapterList" class="chapter-list"></ol>
+    </aside>
+
+    <section class="editor">
+      <input id="chapterTitle" class="chapter-title-in" placeholder="Chapter title" />
+      <textarea id="chapterBody" class="chapter-body" placeholder="Start writing in Markdown…  # Heading  **bold**  *italic*  - list"></textarea>
+
+      <div class="ai">
+        <div class="ai-row">
+          <input id="aiPrompt" class="ai-prompt" placeholder="Tell the AI what to write or change…" />
+          <button id="aiDraft" class="ai-btn" type="button" title="Write from your prompt">✍️ Draft</button>
+          <button id="aiContinue" class="ai-btn" type="button" title="Continue this chapter">➡️ Continue</button>
+          <button id="aiRewrite" class="ai-btn" type="button" title="Rewrite the selected text">🔁 Rewrite</button>
+          <button id="aiOutline" class="ai-btn" type="button" title="Outline from your prompt">📋 Outline</button>
+        </div>
+        <div id="aiResult" class="ai-result" hidden>
+          <pre id="aiResultText" class="ai-result-text"></pre>
+          <div class="ai-result-actions">
+            <button id="aiInsert" class="ghost" type="button">Insert at cursor</button>
+            <button id="aiReplace" class="ghost" type="button">Replace selection</button>
+            <button id="aiAppend" class="ghost" type="button">Append</button>
+            <span style="flex:1"></span>
+            <button id="aiDiscard" class="ghost" type="button">Discard</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="preview">
+      <div class="preview-head dim">Preview</div>
+      <article id="previewBody" class="preview-body"></article>
+    </section>
+  </main>
+
+  <footer class="statusbar"><span id="status" class="dim">Draft autosaves to this browser.</span></footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
