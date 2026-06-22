@@ -14,7 +14,10 @@
       <span id="wordcount" class="dim"></span>
       <button id="btnUndo" class="ghost" type="button" title="Undo (Ctrl/Cmd+Z)" disabled>↶ Undo</button>
       <button id="btnRedo" class="ghost" type="button" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷ Redo</button>
-      <button id="btnRich" class="ghost" type="button" title="Advanced: edit the raw Markdown source">⚙ Advanced — Edit MD source</button>
+      <span class="mode-switch" role="group" aria-label="Editor mode">
+        <button id="btnWysiwyg" class="mode-btn" type="button" title="Visual (WYSIWYG) editing">✨ WYSIWYG</button>
+        <button id="btnAdvanced" class="mode-btn" type="button" title="Advanced: edit the raw Markdown source">⚙ Advanced (MD source)</button>
+      </span>
       <button id="btnImport" class="ghost" type="button">Import</button>
       <button id="btnExport" class="ghost" type="button">Export draft</button>
       <input id="importFile" type="file" accept="application/json" hidden />

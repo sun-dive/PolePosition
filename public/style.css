@@ -16,6 +16,11 @@ button { font: inherit; cursor: pointer; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .brand { font-size: 15px; }
 .actions { display: flex; align-items: center; gap: 10px; }
+.mode-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.mode-btn { background: transparent; color: var(--muted); border: 0; padding: 5px 10px; font-size: 13px; }
+.mode-btn + .mode-btn { border-left: 1px solid var(--line); }
+.mode-btn:hover { color: var(--fg); }
+.mode-btn.active { background: #1f6feb33; color: var(--fg); }
 
 .meta { display: flex; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .title-in, .author-in { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 8px 10px; }
@@ -58,7 +63,6 @@ body.rich-mode .rich-editor {
   display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto;
   border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
 }
-body.rich-mode #btnRich { border-color: var(--accent); color: var(--fg); }
 .rich-editor .milkdown { flex: 1 1 auto; background: transparent; }
 .rich-editor .milkdown .ProseMirror { padding: 14px 16px; }
 

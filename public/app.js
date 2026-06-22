@@ -275,21 +275,20 @@ async function mountRich () {
   await window.PPMilkdown.mount($('richEditor'), active().body, md => { active().body = md; updateWordcount(); save(); recordSoon() })
 }
 function refreshEditorView () { if (richMode) mountRich(); else renderEditor() }
-function setRichButton () {
-  const b = $('btnRich')
-  if (richMode) { b.textContent = '⚙ Advanced — Edit MD source'; b.title = 'Advanced: edit the raw Markdown source' }
-  else { b.textContent = '✨ WYSIWYG'; b.title = 'Switch to visual (WYSIWYG) editing' }
+function setModeButtons () {
+  $('btnWysiwyg').classList.toggle('active', richMode)
+  $('btnAdvanced').classList.toggle('active', !richMode)
 }
 async function enterRich () {
-  if (!window.PPMilkdown) { flash('Rich editor isn’t loaded — run “npm run build:editor”. Using Markdown for now.'); setRichButton(); return }
+  if (!window.PPMilkdown) { flash('Rich editor isn’t loaded — run “npm run build:editor”. Using Markdown for now.'); setModeButtons(); return }
   richBusy = true; richMode = true
-  document.body.classList.add('rich-mode'); setRichButton()
+  document.body.classList.add('rich-mode'); setModeButtons()
   try {
     await mountRich()
     try { localStorage.setItem(MODEKEY, 'rich') } catch {}
     flash('Rich editing — your Markdown is saved underneath.')
   } catch (e) {
-    richMode = false; document.body.classList.remove('rich-mode'); setRichButton()
+    richMode = false; document.body.classList.remove('rich-mode'); setModeButtons()
     flash('Rich editor failed to start: ' + e.message)
   } finally { richBusy = false }
 }
@@ -297,12 +296,12 @@ async function exitRich () {
   richBusy = true
   flushRich()
   await window.PPMilkdown.destroy()
-  richMode = false; document.body.classList.remove('rich-mode'); setRichButton()
+  richMode = false; document.body.classList.remove('rich-mode'); setModeButtons()
   try { localStorage.setItem(MODEKEY, 'md') } catch {}
   renderEditor(); save(); richBusy = false
 }
-async function toggleRich () { if (richBusy) return; if (richMode) await exitRich(); else await enterRich() }
-$('btnRich').onclick = toggleRich
+$('btnWysiwyg').onclick = () => { if (!richBusy && !richMode) enterRich() }
+$('btnAdvanced').onclick = () => { if (!richBusy && richMode) exitRich() }
 
 /* ---- Undo / Redo (whole-book snapshots) ----
    Programmatic edits (toolbar, AI) wipe the textarea's native undo, so we keep our own stack.
@@ -358,6 +357,6 @@ document.addEventListener('keydown', e => {
 renderChapters(); renderEditor()
 recordNow() // seed history with the loaded state
 
-// Default to Rich (visual) mode; "Advanced" = Markdown source. Remember the user's last choice.
-setRichButton()
+// Default to WYSIWYG mode; "Advanced" = Markdown source. Remember the user's last choice.
+setModeButtons()
 if ((localStorage.getItem(MODEKEY) || 'rich') !== 'md') enterRich()
