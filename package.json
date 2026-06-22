@@ -4,6 +4,8 @@
   "description": "The **create** corner of the trinity — a local-first studio to write & illustrate an ebook with AI help, then mint it as a SMART NFT.",
   "main": "index.js",
   "scripts": {
+    "build:editor": "node build-editor.mjs",
+    "postinstall": "node build-editor.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -11,6 +13,10 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.185"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.185",
+    "@milkdown/crepe": "^7.5.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.0"
   }
 }

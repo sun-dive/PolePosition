@@ -11,6 +11,7 @@ body {
 button { font: inherit; cursor: pointer; }
 .ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; }
 .ghost:hover { border-color: var(--accent); color: var(--fg); }
+.ghost:disabled { opacity: .4; cursor: default; border-color: var(--line); color: var(--muted); }
 
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .brand { font-size: 15px; }
@@ -37,8 +38,29 @@ button { font: inherit; cursor: pointer; }
 
 .editor { padding: 12px; }
 .chapter-title-in { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 8px 10px; font-weight: 600; margin-bottom: 8px; }
+.md-toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.md-btn { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; font-size: 13px; line-height: 1; min-width: 30px; }
+.md-btn:hover { border-color: var(--accent); color: var(--fg); }
+.md-btn b, .md-btn i { color: var(--fg); }
+.md-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 4px; }
+.preview-body blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.preview-body ol { padding-left: 1.4em; }
 .chapter-body { flex: 1 1 auto; resize: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 12px; font: 15px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .chapter-body:focus, .title-in:focus, .author-in:focus, .chapter-title-in:focus { outline: none; border-color: var(--accent); }
+
+/* ---- Rich (WYSIWYG / Milkdown) mode — toggled by body.rich-mode ---- */
+.rich-editor { display: none; }
+body.rich-mode .md-toolbar,
+body.rich-mode #chapterBody,
+body.rich-mode .preview { display: none; }
+body.rich-mode .layout { grid-template-columns: 220px 1fr; }
+body.rich-mode .rich-editor {
+  display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+}
+body.rich-mode #btnRich { border-color: var(--accent); color: var(--fg); }
+.rich-editor .milkdown { flex: 1 1 auto; background: transparent; }
+.rich-editor .milkdown .ProseMirror { padding: 14px 16px; }
 
 .ai { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
 .ai-row { display: flex; gap: 6px; flex-wrap: wrap; }

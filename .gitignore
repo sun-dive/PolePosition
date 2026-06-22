@@ -3,6 +3,11 @@ node_modules/
 *.local
 .DS_Store
 
+# generated rich-editor bundle (rebuilt by `npm run build:editor`)
+public/editor.bundle.js
+public/editor.bundle.css
+
 # private planning doc
 PLAN.md
 workshop-starter.json
+main-book-starter.json

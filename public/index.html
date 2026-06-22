@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pole Position — create your NFT</title>
+  <link rel="stylesheet" href="editor.bundle.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -11,6 +12,9 @@
     <div class="brand">🏁 <b>Pole&nbsp;Position</b> <span class="dim">— write it, illustrate it, mint it.</span></div>
     <div class="actions">
       <span id="wordcount" class="dim"></span>
+      <button id="btnUndo" class="ghost" type="button" title="Undo (Ctrl/Cmd+Z)" disabled>↶ Undo</button>
+      <button id="btnRedo" class="ghost" type="button" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷ Redo</button>
+      <button id="btnRich" class="ghost" type="button" title="Switch to rich (WYSIWYG) editing">✨ Rich</button>
       <button id="btnImport" class="ghost" type="button">Import</button>
       <button id="btnExport" class="ghost" type="button">Export draft</button>
       <input id="importFile" type="file" accept="application/json" hidden />
@@ -30,7 +34,20 @@
 
     <section class="editor">
       <input id="chapterTitle" class="chapter-title-in" placeholder="Chapter title" />
-      <textarea id="chapterBody" class="chapter-body" placeholder="Start writing in Markdown…  # Heading  **bold**  *italic*  - list"></textarea>
+      <div id="mdToolbar" class="md-toolbar" title="Format — no Markdown knowledge needed">
+        <button type="button" class="md-btn" data-md="h1" title="Heading 1">H1</button>
+        <button type="button" class="md-btn" data-md="h2" title="Heading 2">H2</button>
+        <span class="md-sep"></span>
+        <button type="button" class="md-btn" data-md="bold" title="Bold (Ctrl/Cmd+B)"><b>B</b></button>
+        <button type="button" class="md-btn" data-md="italic" title="Italic (Ctrl/Cmd+I)"><i>I</i></button>
+        <span class="md-sep"></span>
+        <button type="button" class="md-btn" data-md="ul" title="Bullet list">• List</button>
+        <button type="button" class="md-btn" data-md="ol" title="Numbered list">1. List</button>
+        <button type="button" class="md-btn" data-md="quote" title="Quote">❝ Quote</button>
+        <button type="button" class="md-btn" data-md="link" title="Link">🔗 Link</button>
+      </div>
+      <textarea id="chapterBody" class="chapter-body" placeholder="Start writing — or use the buttons above. No Markdown to memorise."></textarea>
+      <div id="richEditor" class="rich-editor"></div>
 
       <div class="ai">
         <div class="ai-row">
@@ -61,6 +78,7 @@
 
   <footer class="statusbar"><span id="status" class="dim">Draft autosaves to this browser.</span></footer>
 
+  <script src="editor.bundle.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
