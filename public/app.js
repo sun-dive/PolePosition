@@ -1,6 +1,7 @@
 /* Pole Position — Phase 1 editor: chapters + Markdown + live preview + localStorage autosave.
    (Phase 2 adds Claude writing assist, Phase 3 fal images + cover, Phase 4 EPUB export, Phase 5 mint.) */
 const KEY = 'polepos:draft'
+const MODEKEY = 'polepos:mode' // 'rich' (default, visual) | 'md' (advanced, Markdown source)
 const $ = id => document.getElementById(id)
 const uid = () => 'c' + Math.random().toString(36).slice(2, 9)
 
@@ -274,15 +275,21 @@ async function mountRich () {
   await window.PPMilkdown.mount($('richEditor'), active().body, md => { active().body = md; updateWordcount(); save(); recordSoon() })
 }
 function refreshEditorView () { if (richMode) mountRich(); else renderEditor() }
+function setRichButton () {
+  const b = $('btnRich')
+  if (richMode) { b.textContent = '⚙ Advanced — Edit MD source'; b.title = 'Advanced: edit the raw Markdown source' }
+  else { b.textContent = '✨ WYSIWYG'; b.title = 'Switch to visual (WYSIWYG) editing' }
+}
 async function enterRich () {
-  if (!window.PPMilkdown) { flash('Rich editor isn’t loaded — run “npm run build:editor”. Staying in Markdown.'); return }
+  if (!window.PPMilkdown) { flash('Rich editor isn’t loaded — run “npm run build:editor”. Using Markdown for now.'); setRichButton(); return }
   richBusy = true; richMode = true
-  document.body.classList.add('rich-mode')
-  $('btnRich').textContent = '✎ Markdown'; $('btnRich').title = 'Switch back to Markdown source'
-  try { await mountRich(); flash('Rich editing — your Markdown is saved underneath.') }
-  catch (e) {
-    richMode = false; document.body.classList.remove('rich-mode')
-    $('btnRich').textContent = '✨ Rich'; $('btnRich').title = 'Switch to rich (WYSIWYG) editing'
+  document.body.classList.add('rich-mode'); setRichButton()
+  try {
+    await mountRich()
+    try { localStorage.setItem(MODEKEY, 'rich') } catch {}
+    flash('Rich editing — your Markdown is saved underneath.')
+  } catch (e) {
+    richMode = false; document.body.classList.remove('rich-mode'); setRichButton()
     flash('Rich editor failed to start: ' + e.message)
   } finally { richBusy = false }
 }
@@ -290,8 +297,8 @@ async function exitRich () {
   richBusy = true
   flushRich()
   await window.PPMilkdown.destroy()
-  richMode = false; document.body.classList.remove('rich-mode')
-  $('btnRich').textContent = '✨ Rich'; $('btnRich').title = 'Switch to rich (WYSIWYG) editing'
+  richMode = false; document.body.classList.remove('rich-mode'); setRichButton()
+  try { localStorage.setItem(MODEKEY, 'md') } catch {}
   renderEditor(); save(); richBusy = false
 }
 async function toggleRich () { if (richBusy) return; if (richMode) await exitRich(); else await enterRich() }
@@ -350,3 +357,7 @@ document.addEventListener('keydown', e => {
 
 renderChapters(); renderEditor()
 recordNow() // seed history with the loaded state
+
+// Default to Rich (visual) mode; "Advanced" = Markdown source. Remember the user's last choice.
+setRichButton()
+if ((localStorage.getItem(MODEKEY) || 'rich') !== 'md') enterRich()
