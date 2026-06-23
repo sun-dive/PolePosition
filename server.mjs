@@ -33,6 +33,7 @@ if (process.env.ANTHROPIC_API_KEY) {
   delete process.env.ANTHROPIC_API_KEY
 }
 const MODEL = process.env.CLAUDE_MODEL || undefined // optional, e.g. claude-opus-4-8; default = subscription default
+const FAL_MODEL = process.env.FAL_MODEL || 'fal-ai/flux/dev' // P3 image model (override via .env)
 
 const SYSTEM = 'You are a skilled co-author helping write an ebook. Write engaging, clear prose that matches the existing tone and style. Output ONLY the requested content as Markdown — no preamble, no explanations, no meta-commentary, no surrounding quotes.'
 
@@ -78,6 +79,37 @@ function friendlyError (code) {
   return 'The model could not complete the request (' + code + ').'
 }
 
+// Generate an image via fal.ai (P3). Uses FAL_API_KEY from .env — never logged. Returns a data: URL so the
+// browser can show + save it without depending on fal's (time-limited) CDN link.
+async function falImage ({ prompt, width, height }) {
+  const key = process.env.FAL_API_KEY
+  if (!key) throw new Error('FAL_API_KEY isn’t set — add it to your local .env to generate images.')
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 180000)
+  let res
+  try {
+    res = await fetch('https://fal.run/' + FAL_MODEL, {
+      method: 'POST',
+      headers: { authorization: 'Key ' + key, 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt, image_size: { width, height }, num_images: 1, enable_safety_checker: true }),
+      signal: ctrl.signal
+    })
+  } catch (e) {
+    throw new Error(e.name === 'AbortError' ? 'fal.ai timed out — try again.' : ('fal.ai request failed: ' + e.message))
+  } finally { clearTimeout(timer) }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const d = data && data.detail
+    throw new Error('fal.ai: ' + (typeof d === 'string' ? d : d ? JSON.stringify(d) : ('error ' + res.status)))
+  }
+  const img = data && data.images && data.images[0]
+  if (!img || !img.url) throw new Error('fal.ai returned no image.')
+  const imgRes = await fetch(img.url)
+  const buf = Buffer.from(await imgRes.arrayBuffer())
+  const ct = img.content_type || imgRes.headers.get('content-type') || 'image/jpeg'
+  return 'data:' + ct + ';base64,' + buf.toString('base64')
+}
+
 function sendJson (res, code, obj) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
 function readJson (req) {
   return new Promise((resolve, reject) => {
@@ -102,6 +134,21 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, { text })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'AI request failed' })
+    }
+  }
+
+  // ── Image generation (fal.ai, P3) ──
+  if (url.pathname === '/api/image' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    if (!body.prompt || !String(body.prompt).trim()) return sendJson(res, 400, { error: 'Describe the image first.' })
+    const width = Math.min(Math.max(Number(body.width) || 1024, 256), 1536)
+    const height = Math.min(Math.max(Number(body.height) || 1536, 256), 1536)
+    try {
+      const dataUrl = await falImage({ prompt: String(body.prompt).trim(), width, height })
+      return sendJson(res, 200, { dataUrl })
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message || 'image generation failed' })
     }
   }
 

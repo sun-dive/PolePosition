@@ -65,6 +65,7 @@ function loadActiveIntoEditor () {
   renderProjects(); renderChapters()
   if (richMode) mountRich(); else renderEditor()
   resetHistory() // undo history is per-book
+  coverData = ''; updateCoverButton() // cover is per-book too
 }
 async function switchProject (id) {
   if (!id || id === projects.activeId) return
@@ -429,10 +430,55 @@ document.addEventListener('keydown', e => {
   else if (k === 'y') { e.preventDefault(); redo() }
 })
 
+/* ---- Cover image generator (P3 — fal.ai via /api/image) ---- */
+const DEFAULT_COVER_PROMPT = `A pair of cupped human hands gently cradling a glowing digital book that radiates warm golden light, light spilling softly between the fingers. Deep charcoal background with subtle bokeh and faint flowing streams of light-particles, a quiet hint of AI and data. Cinematic, premium, photorealistic with a touch of magic. Warm gold and amber tones against the dark, shallow depth of field; the glowing book is the clear focal point. Leave generous empty space at the top and bottom for a title. Book-cover composition, portrait orientation, highly detailed. No text, no letters, no watermark.`
+let coverData = '' // last generated/loaded cover data URL for the active book
+function updateCoverButton () { $('btnCover').classList.toggle('has-cover', !!book.cover) }
+function openCover () {
+  if (!$('coverPrompt').value.trim()) $('coverPrompt').value = DEFAULT_COVER_PROMPT
+  if (book.cover && !coverData) { coverData = book.cover; $('coverImg').src = book.cover; $('coverResult').hidden = false; $('coverStatus').textContent = 'Current cover for this book.' }
+  $('coverModal').hidden = false
+}
+function closeCover () { $('coverModal').hidden = true }
+async function generateCover () {
+  const prompt = $('coverPrompt').value.trim()
+  if (!prompt) { $('coverStatus').textContent = 'Describe the cover first.'; return }
+  $('coverGen').disabled = true; $('coverStatus').textContent = 'Generating… (can take 20–40s)'
+  try {
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, width: 1024, height: 1536 }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('coverStatus').textContent = data.error || ('Error ' + r.status); return }
+    coverData = data.dataUrl
+    $('coverImg').src = coverData; $('coverResult').hidden = false; $('coverStatus').textContent = 'Done — use it, regenerate, or tweak the prompt.'
+  } catch (e) {
+    $('coverStatus').textContent = 'Request failed — is the server running? ' + e.message
+  } finally { $('coverGen').disabled = false }
+}
+function useCover () {
+  if (!coverData) return
+  book.cover = coverData; save(); updateCoverButton()
+  $('coverStatus').textContent = 'Saved as this book’s cover.'; flash('Cover saved to this book.')
+}
+function downloadCover () {
+  if (!coverData) return
+  const ext = (coverData.slice(5, coverData.indexOf(';')).split('/')[1]) || 'jpg'
+  const a = document.createElement('a')
+  a.href = coverData
+  a.download = (book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-cover.' + ext
+  a.click()
+}
+$('btnCover').onclick = openCover
+$('coverClose').onclick = closeCover
+$('coverModal').addEventListener('click', e => { if (e.target === $('coverModal')) closeCover() })
+$('coverGen').onclick = generateCover
+$('coverUse').onclick = useCover
+$('coverDownload').onclick = downloadCover
+
 renderProjects()
 renderChapters(); renderEditor()
 recordNow() // seed history with the loaded state
 
 // Default to WYSIWYG mode; "Advanced" = Markdown source. Remember the user's last choice.
 setModeButtons()
+updateCoverButton()
 if ((localStorage.getItem(MODEKEY) || 'rich') !== 'md') enterRich()
