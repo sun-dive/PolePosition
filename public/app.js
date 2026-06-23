@@ -1,30 +1,100 @@
 /* Pole Position — Phase 1 editor: chapters + Markdown + live preview + localStorage autosave.
    (Phase 2 adds Claude writing assist, Phase 3 fal images + cover, Phase 4 EPUB export, Phase 5 mint.) */
-const KEY = 'polepos:draft'
-const MODEKEY = 'polepos:mode' // 'rich' (default, visual) | 'md' (advanced, Markdown source)
+const LEGACY_KEY = 'polepos:draft' // pre-projects single draft (migrated once into a project)
+const IDXKEY = 'polepos:projects'  // { activeId, list:[{id,name}] }
+const MODEKEY = 'polepos:mode'     // 'rich' (default, visual) | 'md' (advanced, Markdown source)
+const bookKey = id => 'polepos:book:' + id
 const $ = id => document.getElementById(id)
 const uid = () => 'c' + Math.random().toString(36).slice(2, 9)
+const pid = () => 'p' + Math.random().toString(36).slice(2, 9)
 
 function blank () {
   return { title: '', author: '', activeId: null, chapters: [{ id: uid(), title: 'Chapter 1', body: '' }] }
 }
-function load () {
-  try { const b = JSON.parse(localStorage.getItem(KEY)); if (b && Array.isArray(b.chapters) && b.chapters.length) return b } catch {}
-  return blank()
+function normalize (b) { if (!b.activeId || !b.chapters.some(c => c.id === b.activeId)) b.activeId = b.chapters[0].id; return b }
+function readBook (id) {
+  try { const b = JSON.parse(localStorage.getItem(bookKey(id))); if (b && Array.isArray(b.chapters) && b.chapters.length) return normalize(b) } catch {}
+  return null
 }
-let book = load()
-if (!book.activeId || !book.chapters.some(c => c.id === book.activeId)) book.activeId = book.chapters[0].id
+
+// ---- projects index (one-time migration of the legacy single draft) ----
+let projects = (() => {
+  try { const x = JSON.parse(localStorage.getItem(IDXKEY)); if (x && Array.isArray(x.list) && x.list.length) return x } catch {}
+  return null
+})()
+if (!projects) {
+  let legacy = null
+  try { const b = JSON.parse(localStorage.getItem(LEGACY_KEY)); if (b && Array.isArray(b.chapters) && b.chapters.length) legacy = normalize(b) } catch {}
+  const id = pid(); const b = legacy || normalize(blank())
+  projects = { activeId: id, list: [{ id, name: b.title || 'Untitled' }] }
+  try { localStorage.setItem(bookKey(id), JSON.stringify(b)); localStorage.setItem(IDXKEY, JSON.stringify(projects)) } catch {}
+}
+let book = readBook(projects.activeId) || normalize(blank())
 
 let saveTimer = null
+function persistIndex () { try { localStorage.setItem(IDXKEY, JSON.stringify(projects)) } catch {} }
+function syncProjectName () {
+  const e = projects.list.find(p => p.id === projects.activeId), nm = book.title || 'Untitled'
+  if (e && e.name !== nm) { e.name = nm; persistIndex(); renderProjects() }
+}
+function saveNow () { try { localStorage.setItem(bookKey(projects.activeId), JSON.stringify(book)); syncProjectName() } catch {} }
 function save () {
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem(KEY, JSON.stringify(book)); flash('Saved') } catch { flash('Could not save (storage full?)') }
+    try { localStorage.setItem(bookKey(projects.activeId), JSON.stringify(book)); syncProjectName(); flash('Saved') }
+    catch { flash('Could not save (storage full?)') }
   }, 350)
 }
-function flash (msg) { $('status').textContent = msg; }
+function flash (msg) { $('status').textContent = msg }
 
 const active = () => book.chapters.find(c => c.id === book.activeId)
+
+/* ---- projects: switch / new / delete (each book is its own draft) ---- */
+function renderProjects () {
+  const sel = $('projectSelect'); if (!sel) return
+  sel.innerHTML = ''
+  projects.list.forEach(p => {
+    const o = document.createElement('option')
+    o.value = p.id; o.textContent = p.name || 'Untitled'
+    if (p.id === projects.activeId) o.selected = true
+    sel.appendChild(o)
+  })
+}
+function loadActiveIntoEditor () {
+  $('bookTitle').value = book.title || ''; $('bookAuthor').value = book.author || ''
+  renderProjects(); renderChapters()
+  if (richMode) mountRich(); else renderEditor()
+  resetHistory() // undo history is per-book
+}
+async function switchProject (id) {
+  if (!id || id === projects.activeId) return
+  flushRich(); saveNow()
+  projects.activeId = id; persistIndex()
+  book = readBook(id) || normalize(blank())
+  loadActiveIntoEditor()
+  flash('Opened “' + (book.title || 'Untitled') + '”')
+}
+function newProject () {
+  flushRich(); saveNow()
+  const name = (prompt('Name your new book (you can rename it anytime):', '') || '').trim()
+  const id = pid(); const b = normalize(blank()); b.title = name
+  projects.list.push({ id, name: name || 'Untitled' }); projects.activeId = id; persistIndex()
+  try { localStorage.setItem(bookKey(id), JSON.stringify(b)) } catch {}
+  book = b
+  loadActiveIntoEditor()
+  flash('New book created — start writing.')
+}
+function deleteProject () {
+  if (projects.list.length === 1) { flash('You need at least one book.'); return }
+  const e = projects.list.find(p => p.id === projects.activeId)
+  if (!confirm('Delete “' + (e?.name || 'this book') + '”? This can’t be undone.')) return
+  try { localStorage.removeItem(bookKey(projects.activeId)) } catch {}
+  projects.list = projects.list.filter(p => p.id !== projects.activeId)
+  projects.activeId = projects.list[0].id; persistIndex()
+  book = readBook(projects.activeId) || normalize(blank())
+  loadActiveIntoEditor()
+  flash('Book deleted.')
+}
 
 /* ---- minimal Markdown → HTML (headings, bold, italic, links, bullet/numbered lists, quotes, hr) ---- */
 function md (src) {
@@ -128,7 +198,7 @@ function importDraft (file) {
       recordBefore() // keep the pre-import draft on the undo stack
       book = b; if (!book.chapters.some(c => c.id === book.activeId)) book.activeId = book.chapters[0].id
       $('bookTitle').value = book.title || ''; $('bookAuthor').value = book.author || ''
-      renderChapters(); refreshEditorView(); save(); recordNow(); flash('Imported draft.')
+      renderChapters(); refreshEditorView(); save(); syncProjectName(); recordNow(); flash('Imported draft.')
     } catch { flash('That file isn’t a valid Pole Position draft.') }
   }
   r.readAsText(file)
@@ -145,6 +215,9 @@ $('btnAddChapter').onclick = addChapter
 $('btnExport').onclick = exportDraft
 $('btnImport').onclick = () => $('importFile').click()
 $('importFile').onchange = e => { if (e.target.files[0]) importDraft(e.target.files[0]) }
+$('projectSelect').onchange = e => switchProject(e.target.value)
+$('btnNewProject').onclick = newProject
+$('btnDeleteProject').onclick = deleteProject
 
 /* ---- AI writing assist (P2): draft / continue / rewrite / outline via the local /api/write proxy ---- */
 let aiResult = '', aiSel = { start: 0, end: 0 }
@@ -333,7 +406,8 @@ async function restoreSnap (idx) {
   $('bookTitle').value = book.title || ''; $('bookAuthor').value = book.author || ''
   renderChapters()
   if (richMode) await mountRich(); else renderEditor()
-  try { localStorage.setItem(KEY, JSON.stringify(book)) } catch {}
+  try { localStorage.setItem(bookKey(projects.activeId), JSON.stringify(book)) } catch {}
+  syncProjectName()
   updateUndoButtons()
   flash(idx === 0 ? 'Back to the start.' : 'Undone.')
   setTimeout(() => { restoring = false }, 0) // ignore any mount-triggered change events
@@ -344,6 +418,7 @@ function undo () {
   if (histIdx > 0) restoreSnap(histIdx - 1)
 }
 function redo () { if (restoring) return; clearTimeout(histTimer); if (histIdx < history.length - 1) restoreSnap(histIdx + 1) }
+function resetHistory () { history = []; histIdx = -1; recordNow() } // fresh undo stack per book
 $('btnUndo').onclick = undo
 $('btnRedo').onclick = redo
 document.addEventListener('keydown', e => {
@@ -354,6 +429,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'y') { e.preventDefault(); redo() }
 })
 
+renderProjects()
 renderChapters(); renderEditor()
 recordNow() // seed history with the loaded state
 

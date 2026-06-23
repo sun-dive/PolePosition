@@ -24,6 +24,8 @@ button { font: inherit; cursor: pointer; }
 
 .meta { display: flex; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .title-in, .author-in { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 8px 10px; }
+.project-select { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); padding: 8px 10px; max-width: 220px; }
+.project-select:focus { outline: none; border-color: var(--accent); }
 .title-in { flex: 1 1 auto; font-weight: 600; }
 .author-in { flex: 0 0 220px; }
 
