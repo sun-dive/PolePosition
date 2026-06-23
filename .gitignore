@@ -7,6 +7,12 @@ node_modules/
 public/editor.bundle.js
 public/editor.bundle.css
 
+# generated / downloaded image art (kept local, not committed)
+*-cover.png
+*-cover.jpg
+*-cover.jpeg
+*-cover.webp
+
 # private planning doc
 PLAN.md
 workshop-starter.json
