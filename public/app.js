@@ -504,6 +504,13 @@ $('coverModal').addEventListener('click', e => { if (e.target === $('coverModal'
 $('coverGen').onclick = generateCover
 $('coverUse').onclick = useCover
 $('coverDownload').onclick = downloadCover
+$('coverOpen').onclick = () => $('coverFile').click()
+$('coverFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return
+  const rd = new FileReader()
+  rd.onload = () => { coverData = rd.result; $('coverImg').src = coverData; $('coverResult').hidden = false; $('coverStatus').textContent = 'Image loaded — refine it below, or use/download.' }
+  rd.readAsDataURL(f); e.target.value = ''
+}
 
 renderProjects()
 renderChapters(); renderEditor()
