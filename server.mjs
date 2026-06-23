@@ -90,12 +90,13 @@ async function optimizeImagePrompt (description, kind) {
 // Generate an image via fal.ai (P3). Uses FAL_API_KEY from .env — never logged. Returns a data: URL so the
 // browser can show + save it without depending on fal's (time-limited) CDN link. Model-aware: nano-banana
 // (Gemini) takes aspect_ratio + is strong at text; flux-style models take image_size.
-async function falImage ({ prompt, model, aspectRatio, width, height }) {
+async function falImage ({ prompt, model, aspectRatio, width, height, imageUrls }) {
   const key = process.env.FAL_API_KEY
   if (!key) throw new Error('FAL_API_KEY isn’t set — add it to your local .env to generate images.')
-  const m = model || FAL_MODEL
+  const editing = Array.isArray(imageUrls) && imageUrls.length > 0
+  const m = model || (editing ? 'fal-ai/nano-banana/edit' : FAL_MODEL)
   const input = m.includes('nano-banana')
-    ? { prompt, aspect_ratio: aspectRatio || '2:3', num_images: 1, output_format: 'png' }
+    ? { prompt, aspect_ratio: aspectRatio || '2:3', num_images: 1, output_format: 'png', ...(editing ? { image_urls: imageUrls } : {}) }
     : { prompt, image_size: { width: width || 1024, height: height || 1536 }, num_images: 1, enable_safety_checker: true }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 180000)
@@ -127,7 +128,7 @@ function sendJson (res, code, obj) { res.writeHead(code, { 'content-type': 'appl
 function readJson (req) {
   return new Promise((resolve, reject) => {
     let b = ''
-    req.on('data', c => { b += c; if (b.length > 2e6) { reject(new Error('body too large')); req.destroy() } })
+    req.on('data', c => { b += c; if (b.length > 12e6) { reject(new Error('body too large')); req.destroy() } })
     req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}) } catch (e) { reject(e) } })
     req.on('error', reject)
   })
@@ -171,8 +172,9 @@ const server = createServer(async (req, res) => {
     if (!body.prompt || !String(body.prompt).trim()) return sendJson(res, 400, { error: 'Describe the image first.' })
     const width = Math.min(Math.max(Number(body.width) || 1024, 256), 1536)
     const height = Math.min(Math.max(Number(body.height) || 1536, 256), 1536)
+    const imageUrls = (typeof body.image === 'string' && body.image.startsWith('data:')) ? [body.image] : undefined
     try {
-      const dataUrl = await falImage({ prompt: String(body.prompt).trim(), model: body.model, aspectRatio: body.aspectRatio, width, height })
+      const dataUrl = await falImage({ prompt: String(body.prompt).trim(), model: body.model, aspectRatio: body.aspectRatio, width, height, imageUrls })
       return sendJson(res, 200, { dataUrl })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'image generation failed' })

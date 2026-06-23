@@ -481,7 +481,23 @@ async function optimizeCoverPrompt () {
     $('coverOptStatus').textContent = 'Request failed — is the server running? ' + e.message
   } finally { $('coverOptimize').disabled = false }
 }
+async function editCover () {
+  if (!coverData) { $('coverEditStatus').textContent = 'Generate or open an image first.'; return }
+  const instr = $('coverEditInstr').value.trim()
+  if (!instr) { $('coverEditStatus').textContent = 'Describe the change first.'; return }
+  $('coverEdit').disabled = true; $('coverEditStatus').textContent = 'Editing this image… (can take 20–40s)'
+  try {
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: coverData, aspectRatio: '2:3' }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('coverEditStatus').textContent = data.error || ('Error ' + r.status); return }
+    coverData = data.dataUrl; $('coverImg').src = coverData
+    $('coverEditInstr').value = ''; $('coverEditStatus').textContent = 'Edited — Use/Download, or refine again.'
+  } catch (e) {
+    $('coverEditStatus').textContent = 'Request failed — is the server running? ' + e.message
+  } finally { $('coverEdit').disabled = false }
+}
 $('coverOptimize').onclick = optimizeCoverPrompt
+$('coverEdit').onclick = editCover
 $('btnCover').onclick = openCover
 $('coverClose').onclick = closeCover
 $('coverModal').addEventListener('click', e => { if (e.target === $('coverModal')) closeCover() })
