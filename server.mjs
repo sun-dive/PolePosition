@@ -96,7 +96,10 @@ async function falImage ({ prompt, model, aspectRatio, width, height, imageUrls 
   const editing = Array.isArray(imageUrls) && imageUrls.length > 0
   const m = model || (editing ? 'fal-ai/nano-banana/edit' : FAL_MODEL)
   const input = m.includes('nano-banana')
-    ? { prompt, aspect_ratio: aspectRatio || '2:3', num_images: 1, output_format: 'png', ...(editing ? { image_urls: imageUrls } : {}) }
+    ? { prompt, num_images: 1, output_format: 'png',
+        ...(editing
+          ? { image_urls: imageUrls, ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}) } // edit: preserve source framing unless explicitly told otherwise
+          : { aspect_ratio: aspectRatio || '2:3' }) }
     : { prompt, image_size: { width: width || 1024, height: height || 1536 }, num_images: 1, enable_safety_checker: true }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 180000)

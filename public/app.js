@@ -487,7 +487,7 @@ async function editCover () {
   if (!instr) { $('coverEditStatus').textContent = 'Describe the change first.'; return }
   $('coverEdit').disabled = true; $('coverEditStatus').textContent = 'Editing this image… (can take 20–40s)'
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: coverData, aspectRatio: '2:3' }) })
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: coverData }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('coverEditStatus').textContent = data.error || ('Error ' + r.status); return }
     coverData = data.dataUrl; $('coverImg').src = coverData
