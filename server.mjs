@@ -33,9 +33,11 @@ if (process.env.ANTHROPIC_API_KEY) {
   delete process.env.ANTHROPIC_API_KEY
 }
 const MODEL = process.env.CLAUDE_MODEL || undefined // optional, e.g. claude-opus-4-8; default = subscription default
-const FAL_MODEL = process.env.FAL_MODEL || 'fal-ai/flux/dev' // P3 image model (override via .env)
+const FAL_MODEL = process.env.FAL_MODEL || 'fal-ai/nano-banana' // P3 image model (nano-banana = great at text; override via .env)
 
 const SYSTEM = 'You are a skilled co-author helping write an ebook. Write engaging, clear prose that matches the existing tone and style. Output ONLY the requested content as Markdown — no preamble, no explanations, no meta-commentary, no surrounding quotes.'
+
+const IMG_PROMPT_SYSTEM = 'You are an expert prompt engineer for the fal.ai nano-banana (Google Gemini) text-to-image model, specializing in premium ebook covers and book illustrations. Given a short description, write ONE vivid, well-structured image prompt (3–6 sentences) covering subject and composition, art style, lighting, colour palette, and mood. For any words that must appear in the image, quote the EXACT text in double quotes and call for crisp, legible, well-kerned lettering. Aim for professional, marketable results. Output ONLY the final prompt — no preamble, no surrounding quotes, no commentary.'
 
 function buildPrompt ({ mode, instruction, chapterText, selection, title, author }) {
   const head = `Book: "${title || 'Untitled'}"${author ? ` by ${author}` : ''}.`
@@ -49,13 +51,13 @@ function buildPrompt ({ mode, instruction, chapterText, selection, title, author
 }
 
 // Generate text via the Agent SDK (single turn, no tools, no project settings — pure writing).
-async function generate (prompt) {
+async function generate (prompt, system = SYSTEM) {
   const options = {
     maxTurns: 1,
     permissionMode: 'bypassPermissions',
     disallowedTools: ['Bash', 'Edit', 'Write', 'Read', 'WebFetch', 'WebSearch', 'Glob', 'Grep', 'TodoWrite', 'NotebookEdit', 'Task'],
     settingSources: [], // don't load the user's CLAUDE.md/project settings into the writing context
-    systemPrompt: SYSTEM,
+    systemPrompt: system,
     ...(MODEL ? { model: MODEL } : {})
   }
   let text = '', failure = null
@@ -79,19 +81,30 @@ function friendlyError (code) {
   return 'The model could not complete the request (' + code + ').'
 }
 
+// Turn a simple description into a rich image prompt via Claude (subscription) — the masterclass workflow.
+async function optimizeImagePrompt (description, kind) {
+  const what = kind === 'cover' ? 'a premium ebook FRONT-COVER image (portrait orientation)' : 'an in-book illustration'
+  return generate(`Write ${what} prompt from this brief:\n\n"""${description}"""`, IMG_PROMPT_SYSTEM)
+}
+
 // Generate an image via fal.ai (P3). Uses FAL_API_KEY from .env — never logged. Returns a data: URL so the
-// browser can show + save it without depending on fal's (time-limited) CDN link.
-async function falImage ({ prompt, width, height }) {
+// browser can show + save it without depending on fal's (time-limited) CDN link. Model-aware: nano-banana
+// (Gemini) takes aspect_ratio + is strong at text; flux-style models take image_size.
+async function falImage ({ prompt, model, aspectRatio, width, height }) {
   const key = process.env.FAL_API_KEY
   if (!key) throw new Error('FAL_API_KEY isn’t set — add it to your local .env to generate images.')
+  const m = model || FAL_MODEL
+  const input = m.includes('nano-banana')
+    ? { prompt, aspect_ratio: aspectRatio || '2:3', num_images: 1, output_format: 'png' }
+    : { prompt, image_size: { width: width || 1024, height: height || 1536 }, num_images: 1, enable_safety_checker: true }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 180000)
   let res
   try {
-    res = await fetch('https://fal.run/' + FAL_MODEL, {
+    res = await fetch('https://fal.run/' + m, {
       method: 'POST',
       headers: { authorization: 'Key ' + key, 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, image_size: { width, height }, num_images: 1, enable_safety_checker: true }),
+      body: JSON.stringify(input),
       signal: ctrl.signal
     })
   } catch (e) {
@@ -137,6 +150,20 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // ── Optimize a simple description into a rich image prompt (Claude Agent SDK, subscription) ──
+  if (url.pathname === '/api/image-prompt' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    if (!body.description || !String(body.description).trim()) return sendJson(res, 400, { error: 'Describe the image first.' })
+    try {
+      const prompt = await optimizeImagePrompt(String(body.description).trim(), body.kind === 'cover' ? 'cover' : 'inline')
+      if (!prompt) return sendJson(res, 502, { error: 'No prompt returned — try again.' })
+      return sendJson(res, 200, { prompt })
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message || 'prompt optimization failed' })
+    }
+  }
+
   // ── Image generation (fal.ai, P3) ──
   if (url.pathname === '/api/image' && req.method === 'POST') {
     let body
@@ -145,7 +172,7 @@ const server = createServer(async (req, res) => {
     const width = Math.min(Math.max(Number(body.width) || 1024, 256), 1536)
     const height = Math.min(Math.max(Number(body.height) || 1536, 256), 1536)
     try {
-      const dataUrl = await falImage({ prompt: String(body.prompt).trim(), width, height })
+      const dataUrl = await falImage({ prompt: String(body.prompt).trim(), model: body.model, aspectRatio: body.aspectRatio, width, height })
       return sendJson(res, 200, { dataUrl })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'image generation failed' })

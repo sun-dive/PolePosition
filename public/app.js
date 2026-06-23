@@ -431,7 +431,7 @@ document.addEventListener('keydown', e => {
 })
 
 /* ---- Cover image generator (P3 — fal.ai via /api/image) ---- */
-const DEFAULT_COVER_PROMPT = `A pair of cupped human hands gently cradling a glowing digital book that radiates warm golden light, light spilling softly between the fingers. Deep charcoal background with subtle bokeh and faint flowing streams of light-particles, a quiet hint of AI and data. Cinematic, premium, photorealistic with a touch of magic. Warm gold and amber tones against the dark, shallow depth of field; the glowing book is the clear focal point. Leave generous empty space at the top and bottom for a title. Book-cover composition, portrait orientation, highly detailed. No text, no letters, no watermark.`
+const DEFAULT_COVER_PROMPT = `Premium book-cover illustration, portrait orientation. A warm cluster of glowing collectible NFTs floats in mid-air above a pair of open cupped hands that gently release them upward — a luminous ebook, a music NFT with soft sound-wave and musical-note motifs, and a framed digital artwork — each a hovering card edged in golden light. Deep charcoal background, subtle bokeh, faint flowing streams of data-particles (a quiet hint of AI and blockchain). Warm gold and amber glow against the dark; cinematic, photorealistic with a touch of magic, shallow depth of field. Bold title text near the top reading "AI Made It. You Own It." A smaller tagline beneath it reading "Content you own that pays you when it spreads." A small author credit near the bottom reading "Tommy Telford." Crisp, legible, well-kerned lettering; balanced high-end layout; highly detailed.`
 let coverData = '' // last generated/loaded cover data URL for the active book
 function updateCoverButton () { $('btnCover').classList.toggle('has-cover', !!book.cover) }
 function openCover () {
@@ -445,7 +445,7 @@ async function generateCover () {
   if (!prompt) { $('coverStatus').textContent = 'Describe the cover first.'; return }
   $('coverGen').disabled = true; $('coverStatus').textContent = 'Generating… (can take 20–40s)'
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, width: 1024, height: 1536 }) })
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: '2:3' }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('coverStatus').textContent = data.error || ('Error ' + r.status); return }
     coverData = data.dataUrl
@@ -467,6 +467,21 @@ function downloadCover () {
   a.download = (book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-cover.' + ext
   a.click()
 }
+async function optimizeCoverPrompt () {
+  const description = $('coverDesc').value.trim()
+  if (!description) { $('coverOptStatus').textContent = 'Describe it first.'; return }
+  $('coverOptimize').disabled = true; $('coverOptStatus').textContent = 'Claude is writing the prompt…'
+  try {
+    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'cover' }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('coverOptStatus').textContent = data.error || ('Error ' + r.status); return }
+    $('coverPrompt').value = (data.prompt || '').trim()
+    $('coverOptStatus').textContent = 'Prompt ready — tweak it or Generate.'
+  } catch (e) {
+    $('coverOptStatus').textContent = 'Request failed — is the server running? ' + e.message
+  } finally { $('coverOptimize').disabled = false }
+}
+$('coverOptimize').onclick = optimizeCoverPrompt
 $('btnCover').onclick = openCover
 $('coverClose').onclick = closeCover
 $('coverModal').addEventListener('click', e => { if (e.target === $('coverModal')) closeCover() })

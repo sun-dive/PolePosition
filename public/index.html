@@ -88,7 +88,11 @@
   <div id="coverModal" class="modal" hidden>
     <div class="modal-box">
       <div class="modal-head"><b>🎨 Book cover</b><button id="coverClose" class="ghost" type="button">✕</button></div>
-      <p class="dim" style="font-size:12px;margin:0 0 6px">Describe the artwork. Tip: ask for empty space top &amp; bottom and “no text” — you’ll overlay the title cleanly afterward. (Uses fal.ai · needs FAL_API_KEY in .env.)</p>
+      <p class="dim" style="font-size:12px;margin:0 0 6px">Describe it simply — Claude writes the optimized image prompt, then nano-banana generates it. Edit the prompt if you like. (Claude = your subscription · images = fal.ai/FAL_API_KEY.)</p>
+      <label class="dim" style="font-size:12px">Describe the cover</label>
+      <input id="coverDesc" class="title-in" style="width:100%; margin-bottom:6px" placeholder="e.g. floating NFTs of books, music and art; warm gold glow; with the title and tagline" />
+      <div class="row" style="margin:0 0 10px; gap:8px; align-items:center"><button id="coverOptimize" class="ai-btn" type="button">✨ Optimize prompt</button><span id="coverOptStatus" class="dim"></span></div>
+      <label class="dim" style="font-size:12px">Image prompt (edit freely)</label>
       <textarea id="coverPrompt" class="cover-prompt" rows="6"></textarea>
       <div class="row" style="margin-top:8px; align-items:center; gap:8px">
         <button id="coverGen" class="ai-btn" type="button">Generate</button>
