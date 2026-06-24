@@ -230,6 +230,29 @@ async function exportEpub () {
   finally { $('btnEpub').disabled = false }
 }
 $('btnEpub').onclick = exportEpub
+function exportPdf () {
+  flushRich()
+  const css = `@page{margin:18mm}
+*{box-sizing:border-box}
+body{font:16px/1.6 Georgia,'Times New Roman',serif;color:#111;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+h1,h2,h3,h4{font-family:-apple-system,system-ui,'Segoe UI',Roboto,sans-serif;line-height:1.25}
+h1{font-size:1.8em}h2{font-size:1.45em}
+p{margin:0 0 .8em}ul,ol{margin:0 0 .8em 1.4em}
+img{max-width:100%;height:auto;display:block;margin:1em auto;border-radius:6px}
+blockquote{border-left:3px solid #ccc;margin:1em 0;padding:.2em 1em;color:#555}
+a{color:#1a5fb4;text-decoration:none}hr{border:0;border-top:1px solid #ccc;margin:1.5em 0}
+.cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:96vh;margin:0 auto;border-radius:0}
+.chapter{page-break-before:always}`
+  const cover = book.cover ? `<div class="cover"><img src="${book.cover}" alt=""/></div>` : ''
+  const chapters = book.chapters.map(c => `<section class="chapter">${md(c.body || '')}</section>`).join('\n')
+  const auto = '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print()},250)};window.onafterprint=function(){window.close()}</scr' + 'ipt>'
+  const html = `<!doctype html><html><head><meta charset="utf-8"/><base href="${location.origin}/"/><title>${escapeHtml(book.title || 'Book')}</title><style>${css}</style></head><body>${cover}${chapters}${auto}</body></html>`
+  const w = window.open('', '_blank')
+  if (!w) { flash('Allow pop-ups for this page, then click 📄 PDF again (or use the browser’s Print → Save as PDF).'); return }
+  w.document.open(); w.document.write(html); w.document.close()
+  flash('Opening print view — choose “Save as PDF”.')
+}
+$('btnPdf').onclick = exportPdf
 $('btnImport').onclick = () => $('importFile').click()
 $('importFile').onchange = e => { if (e.target.files[0]) importDraft(e.target.files[0]) }
 $('projectSelect').onchange = e => switchProject(e.target.value)
