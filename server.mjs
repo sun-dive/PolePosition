@@ -214,7 +214,7 @@ const server = createServer(async (req, res) => {
     try {
       const buf = await buildEpub(body, { artDir: ART_DIR, modified: new Date().toISOString() })
       res.writeHead(200, { 'content-type': 'application/epub+zip', 'content-disposition': 'attachment; filename="book.epub"' })
-      res.end(buf)
+      return res.end(buf)
     } catch (e) {
       return sendJson(res, 500, { error: 'EPUB build failed: ' + e.message })
     }
