@@ -347,6 +347,7 @@ function flushRich () {
 }
 async function mountRich () {
   if (!window.PPMilkdown) return
+  $('chapterTitle').value = active().title // keep the chapter-title input in sync (it lives outside the Milkdown body)
   await window.PPMilkdown.mount($('richEditor'), active().body, md => { active().body = md; updateWordcount(); save(); recordSoon() })
 }
 function refreshEditorView () { if (richMode) mountRich(); else renderEditor() }
