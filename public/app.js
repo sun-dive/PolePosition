@@ -574,6 +574,25 @@ function downloadArt () {
   const ext = (artData.slice(5, artData.indexOf(';')).split('/')[1]) || 'png'
   const a = document.createElement('a'); a.href = artData; a.download = 'chapter-art.' + ext; a.click()
 }
+// Crop the current image to 1344x768 (OG/social banner size) and download an optimized JPEG — in-browser, no deps.
+function downloadBannerJpeg () {
+  if (!artData) { $('artStatus').textContent = 'Generate or open an image first.'; return }
+  const W = 1344, H = 768
+  const img = new Image()
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = W; c.height = H
+    const ctx = c.getContext('2d')
+    const scale = Math.max(W / img.width, H / img.height) // cover-crop, centered
+    const dw = img.width * scale, dh = img.height * scale
+    ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh)
+    const a = document.createElement('a')
+    a.href = c.toDataURL('image/jpeg', 0.85)
+    a.download = 'banner-1344x768.jpg'; a.click()
+    $('artStatus').textContent = 'Banner JPEG downloaded (1344×768).'
+  }
+  img.onerror = () => { $('artStatus').textContent = 'Could not load the image for banner export.' }
+  img.src = artData
+}
 $('btnArt').onclick = openArt
 $('artClose').onclick = closeArt
 $('artModal').addEventListener('click', e => { if (e.target === $('artModal')) closeArt() })
@@ -582,6 +601,7 @@ $('artGen').onclick = generateArt
 $('artEdit').onclick = editArt
 $('artInsert').onclick = insertArt
 $('artDownload').onclick = downloadArt
+$('artBanner').onclick = downloadBannerJpeg
 $('artOpen').onclick = () => $('artFile').click()
 $('artFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return
