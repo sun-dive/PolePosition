@@ -268,7 +268,11 @@ a{color:#1a5fb4;text-decoration:none}hr{border:0;border-top:1px solid #ccc;margi
   const w = window.open('', '_blank')
   if (!w) { flash('Allow pop-ups for this page, then click 📄 PDF again (or use the browser’s Print → Save as PDF).'); return }
   w.document.open(); w.document.write(html); w.document.close()
-  flash('Opening print view — choose “Save as PDF”.')
+  if (coverJpeg) {
+    const base = (book.title || 'book').replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+    const a = document.createElement('a'); a.href = coverJpeg; a.download = base + '-cover.jpg'; a.click()
+    flash('Cover downloaded; print view open — “Save as PDF” and name it to match.')
+  } else flash('Opening print view — choose “Save as PDF”.')
   } finally { $('btnPdf').disabled = false }
 }
 $('btnPdf').onclick = exportPdf
