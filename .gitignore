@@ -12,6 +12,11 @@ public/editor.bundle.css
 *-cover.jpg
 *-cover.jpeg
 *-cover.webp
+# any image dropped in the repo root (downloads land here)
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
 public/art/
 
 # private planning doc
