@@ -83,10 +83,12 @@ function friendlyError (code) {
 }
 
 // Turn a simple description into a rich image prompt via Claude (subscription) — the masterclass workflow.
-async function optimizeImagePrompt (description, kind, style) {
+async function optimizeImagePrompt (description, kind, style, aspect) {
   const what = kind === 'cover' ? 'a premium ebook FRONT-COVER image (portrait orientation)' : 'an in-book illustration'
   const styleNote = style ? `\n\nThe image WILL be rendered in this fixed house style — describe the subject and composition to suit it, and do NOT introduce a different style: ${style}` : ''
-  return generate(`Write ${what} prompt from this brief:\n\n"""${description}"""${styleNote}`, IMG_PROMPT_SYSTEM)
+  const frames = { '16:9': 'a WIDE LANDSCAPE', '3:4': 'a TALL PORTRAIT', '1:1': 'a SQUARE', '2:3': 'a TALL PORTRAIT' }
+  const aspectNote = aspect && frames[aspect] ? `\n\nCompose for ${frames[aspect]} frame: the illustration MUST fill the entire frame edge to edge — spread the subject and supporting elements across the whole frame. Do NOT place a small centred motif on an empty background.` : ''
+  return generate(`Write ${what} prompt from this brief:\n\n"""${description}"""${styleNote}${aspectNote}`, IMG_PROMPT_SYSTEM)
 }
 
 // Generate an image via fal.ai (P3). Uses FAL_API_KEY from .env — never logged. Returns a data: URL so the
@@ -162,7 +164,7 @@ const server = createServer(async (req, res) => {
     try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
     if (!body.description || !String(body.description).trim()) return sendJson(res, 400, { error: 'Describe the image first.' })
     try {
-      const prompt = await optimizeImagePrompt(String(body.description).trim(), body.kind === 'cover' ? 'cover' : 'inline', typeof body.style === 'string' ? body.style.trim() : '')
+      const prompt = await optimizeImagePrompt(String(body.description).trim(), body.kind === 'cover' ? 'cover' : 'inline', typeof body.style === 'string' ? body.style.trim() : '', typeof body.aspect === 'string' ? body.aspect : '')
       if (!prompt) return sendJson(res, 502, { error: 'No prompt returned — try again.' })
       return sendJson(res, 200, { prompt })
     } catch (e) {

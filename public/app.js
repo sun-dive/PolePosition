@@ -535,7 +535,7 @@ async function optimizeArtPrompt () {
   if (!description) { $('artOptStatus').textContent = 'Describe it first.'; return }
   $('artOptimize').disabled = true; $('artOptStatus').textContent = 'Claude is writing the prompt…'
   try {
-    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'inline', style: $('artStyle').value.trim() }) })
+    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'inline', style: $('artStyle').value.trim(), aspect: $('artAspect').value }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artOptStatus').textContent = data.error || ('Error ' + r.status); return }
     $('artPrompt').value = (data.prompt || '').trim(); $('artOptStatus').textContent = 'Prompt ready — tweak it or Generate.'
@@ -546,10 +546,14 @@ async function generateArt () {
   const base = $('artPrompt').value.trim()
   if (!base) { $('artStatus').textContent = 'Describe/optimize a prompt first.'; return }
   const style = $('artStyle').value.trim()
-  const prompt = style ? `${base}\n\nArt style (apply consistently): ${style}` : base
+  const aspect = $('artAspect').value
+  const frame = aspect === '16:9' ? 'Full-bleed wide landscape composition that fills the entire frame edge to edge — no empty side margins, not a small centred motif.'
+    : aspect === '3:4' ? 'Full-bleed tall portrait composition that fills the frame top to bottom.'
+    : 'Full-bleed composition that fills the entire square frame.'
+  const prompt = `${base}${style ? `\n\nArt style (apply consistently): ${style}` : ''}\n\n${frame}`
   $('artGen').disabled = true; $('artStatus').textContent = 'Generating… (can take 20–40s)'
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: $('artAspect').value }) })
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: aspect }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artStatus').textContent = data.error || ('Error ' + r.status); return }
     artData = data.dataUrl; $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = 'Done — insert, refine, or regenerate.'
