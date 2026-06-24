@@ -230,8 +230,18 @@ async function exportEpub () {
   finally { $('btnEpub').disabled = false }
 }
 $('btnEpub').onclick = exportEpub
-function exportPdf () {
+function imgToJpeg (src, quality) {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); resolve(c.toDataURL('image/jpeg', quality)) }
+    img.onerror = () => resolve(src) // fall back to the original if it can't load
+    img.src = src
+  })
+}
+async function exportPdf () {
   flushRich()
+  $('btnPdf').disabled = true; flash('Preparing PDF (encoding images as JPEG)…')
+  try {
   const css = `@page{margin:18mm}
 *{box-sizing:border-box}
 body{font:16px/1.6 Georgia,'Times New Roman',serif;color:#111;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -244,14 +254,22 @@ blockquote{break-inside:avoid;page-break-inside:avoid;border-left:3px solid #ccc
 a{color:#1a5fb4;text-decoration:none}hr{border:0;border-top:1px solid #ccc;margin:1.5em 0}
 .cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:96vh;margin:0 auto;border-radius:0}
 .chapter{page-break-before:always}`
-  const cover = book.cover ? `<div class="cover"><img src="${book.cover}" alt=""/></div>` : ''
-  const chapters = book.chapters.map(c => `<section class="chapter">${md(c.body || '')}</section>`).join('\n')
+  // PNG masters in public/art stay untouched; encode JPEG only into this PDF
+  const refs = new Set()
+  book.chapters.forEach(c => { const re = /!\[[^\]]*\]\((art\/[^)]+)\)/g; let m; while ((m = re.exec(c.body || ''))) refs.add(m[1]) })
+  const map = new Map()
+  for (const ref of refs) map.set(ref, await imgToJpeg(location.origin + '/' + ref, 0.85))
+  const coverJpeg = book.cover ? await imgToJpeg(book.cover, 0.9) : ''
+  let chapters = book.chapters.map(c => `<section class="chapter">${md(c.body || '')}</section>`).join('\n')
+  for (const [ref, jpeg] of map) chapters = chapters.split(`src="${ref}"`).join(`src="${jpeg}"`)
+  const cover = coverJpeg ? `<div class="cover"><img src="${coverJpeg}" alt=""/></div>` : ''
   const auto = '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print()},250)};window.onafterprint=function(){window.close()}</scr' + 'ipt>'
   const html = `<!doctype html><html><head><meta charset="utf-8"/><base href="${location.origin}/"/><title>${escapeHtml(book.title || 'Book')}</title><style>${css}</style></head><body>${cover}${chapters}${auto}</body></html>`
   const w = window.open('', '_blank')
   if (!w) { flash('Allow pop-ups for this page, then click 📄 PDF again (or use the browser’s Print → Save as PDF).'); return }
   w.document.open(); w.document.write(html); w.document.close()
   flash('Opening print view — choose “Save as PDF”.')
+  } finally { $('btnPdf').disabled = false }
 }
 $('btnPdf').onclick = exportPdf
 $('btnImport').onclick = () => $('importFile').click()
