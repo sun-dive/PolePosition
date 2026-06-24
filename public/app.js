@@ -103,6 +103,7 @@ function md (src) {
   const inline = s => esc(s)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" />')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
   let html = '', list = null, inQuote = false
   const closeList = () => { if (list) { html += list === 'ol' ? '</ol>' : '</ul>'; list = null } }
@@ -509,6 +510,83 @@ $('coverFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return
   const rd = new FileReader()
   rd.onload = () => { coverData = rd.result; $('coverImg').src = coverData; $('coverResult').hidden = false; $('coverStatus').textContent = 'Image loaded — refine it below, or use/download.' }
+  rd.readAsDataURL(f); e.target.value = ''
+}
+
+/* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
+let artData = ''
+function openArt () { $('artModal').hidden = false }
+function closeArt () { $('artModal').hidden = true }
+async function optimizeArtPrompt () {
+  const description = $('artDesc').value.trim()
+  if (!description) { $('artOptStatus').textContent = 'Describe it first.'; return }
+  $('artOptimize').disabled = true; $('artOptStatus').textContent = 'Claude is writing the prompt…'
+  try {
+    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'inline' }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('artOptStatus').textContent = data.error || ('Error ' + r.status); return }
+    $('artPrompt').value = (data.prompt || '').trim(); $('artOptStatus').textContent = 'Prompt ready — tweak it or Generate.'
+  } catch (e) { $('artOptStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('artOptimize').disabled = false }
+}
+async function generateArt () {
+  const prompt = $('artPrompt').value.trim()
+  if (!prompt) { $('artStatus').textContent = 'Describe/optimize a prompt first.'; return }
+  $('artGen').disabled = true; $('artStatus').textContent = 'Generating… (can take 20–40s)'
+  try {
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: $('artAspect').value }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('artStatus').textContent = data.error || ('Error ' + r.status); return }
+    artData = data.dataUrl; $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = 'Done — insert, refine, or regenerate.'
+  } catch (e) { $('artStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('artGen').disabled = false }
+}
+async function editArt () {
+  if (!artData) { $('artEditStatus').textContent = 'Generate or open an image first.'; return }
+  const instr = $('artEditInstr').value.trim()
+  if (!instr) { $('artEditStatus').textContent = 'Describe the change first.'; return }
+  $('artEdit').disabled = true; $('artEditStatus').textContent = 'Editing… (can take 20–40s)'
+  try {
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: artData }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('artEditStatus').textContent = data.error || ('Error ' + r.status); return }
+    artData = data.dataUrl; $('artImg').src = artData; $('artEditInstr').value = ''; $('artEditStatus').textContent = 'Edited — insert, or refine again.'
+  } catch (e) { $('artEditStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('artEdit').disabled = false }
+}
+async function insertArt () {
+  if (!artData) { $('artStatus').textContent = 'Generate or open an image first.'; return }
+  $('artInsert').disabled = true; $('artStatus').textContent = 'Saving + inserting…'
+  try {
+    const r = await fetch('/api/save-image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dataUrl: artData }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('artStatus').textContent = data.error || ('Error ' + r.status); return }
+    const alt = ($('artDesc').value.trim() || 'illustration').replace(/[[\]\n]+/g, ' ').trim()
+    const mark = `![${alt}](${data.url})`
+    if (richMode) applyText(0, 0, mark)
+    else { const t = $('chapterBody'); const p = (document.activeElement === t) ? t.selectionStart : t.value.length; applyText(p, p, mark) }
+    closeArt(); flash('Art inserted into the chapter.')
+  } catch (e) { $('artStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('artInsert').disabled = false }
+}
+function downloadArt () {
+  if (!artData) return
+  const ext = (artData.slice(5, artData.indexOf(';')).split('/')[1]) || 'png'
+  const a = document.createElement('a'); a.href = artData; a.download = 'chapter-art.' + ext; a.click()
+}
+$('btnArt').onclick = openArt
+$('artClose').onclick = closeArt
+$('artModal').addEventListener('click', e => { if (e.target === $('artModal')) closeArt() })
+$('artOptimize').onclick = optimizeArtPrompt
+$('artGen').onclick = generateArt
+$('artEdit').onclick = editArt
+$('artInsert').onclick = insertArt
+$('artDownload').onclick = downloadArt
+$('artOpen').onclick = () => $('artFile').click()
+$('artFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return
+  const rd = new FileReader()
+  rd.onload = () => { artData = rd.result; $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = 'Image loaded — insert or refine it.' }
   rd.readAsDataURL(f); e.target.value = ''
 }
 

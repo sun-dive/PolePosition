@@ -19,6 +19,7 @@
         <button id="btnAdvanced" class="mode-btn" type="button" title="Advanced: edit the raw Markdown source">⚙ Advanced (MD source)</button>
       </span>
       <button id="btnCover" class="ghost" type="button" title="Generate a cover image with AI">🎨 Cover</button>
+      <button id="btnArt" class="ghost" type="button" title="Generate chapter art and insert it">🖼️ Art</button>
       <button id="btnImport" class="ghost" type="button">Import</button>
       <button id="btnExport" class="ghost" type="button">Export draft</button>
       <input id="importFile" type="file" accept="application/json" hidden />
@@ -109,6 +110,39 @@
         <label class="dim" style="font-size:12px; margin-top:10px; display:block">Refine THIS image (nano-banana edit — keeps the composition)</label>
         <input id="coverEditInstr" class="title-in" style="width:100%" placeholder="e.g. add &quot;Tommy Telford&quot; in small text near the bottom" />
         <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="coverEdit" class="ai-btn" type="button">✏️ Edit image</button><span id="coverEditStatus" class="dim"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="artModal" class="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head"><b>🖼️ Chapter art</b><button id="artClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px;margin:0 0 6px">Describe it simply — Claude writes the prompt, nano-banana generates it, and “Insert” drops it into the current chapter.</p>
+      <label class="dim" style="font-size:12px">Describe the illustration</label>
+      <input id="artDesc" class="title-in" style="width:100%; margin-bottom:6px" placeholder="e.g. a clean flat infographic of a flywheel; or a friendly robot at a desk" />
+      <div class="row" style="margin:0 0 10px; gap:8px; align-items:center"><button id="artOptimize" class="ai-btn" type="button">✨ Optimize prompt</button><span id="artOptStatus" class="dim"></span></div>
+      <label class="dim" style="font-size:12px">Image prompt (edit freely)</label>
+      <textarea id="artPrompt" class="cover-prompt" rows="5"></textarea>
+      <div class="row" style="margin-top:8px; align-items:center; gap:8px">
+        <button id="artGen" class="ai-btn" type="button">Generate</button>
+        <select id="artAspect" class="project-select" title="Shape">
+          <option value="16:9">Landscape</option>
+          <option value="1:1">Square</option>
+          <option value="3:4">Portrait</option>
+        </select>
+        <button id="artOpen" class="ghost" type="button">📂 Open…</button>
+        <input id="artFile" type="file" accept="image/*" hidden />
+        <span id="artStatus" class="dim"></span>
+      </div>
+      <div id="artResult" class="cover-result" hidden>
+        <img id="artImg" alt="art preview" />
+        <div class="cover-actions">
+          <button id="artInsert" class="ghost" type="button">Insert into chapter</button>
+          <button id="artDownload" class="ghost" type="button">Download</button>
+        </div>
+        <label class="dim" style="font-size:12px; margin-top:10px; display:block">Refine THIS image (keeps the composition)</label>
+        <input id="artEditInstr" class="title-in" style="width:100%" placeholder="e.g. make the background lighter; keep everything else the same" />
+        <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="artEdit" class="ai-btn" type="button">✏️ Edit image</button><span id="artEditStatus" class="dim"></span></div>
       </div>
     </div>
   </div>

@@ -4,7 +4,7 @@
 //   P2: POST /api/write → Claude (Agent SDK, subscription).   P3 will add /api/image → fal.ai.
 // Setup:  npm install   then   node server.mjs   →   http://localhost:4321
 import { createServer } from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { readFileSync, existsSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = join(HERE, 'public')
+const ART_DIR = join(ROOT, 'art') // saved inline book art (served as /art/<file>)
 const PORT = Number(process.env.PORT) || 4321
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp' }
 
@@ -165,6 +166,23 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, { prompt })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'prompt optimization failed' })
+    }
+  }
+
+  // ── Save a generated image to disk (public/art) → return its URL, for inline book art ──
+  if (url.pathname === '/api/save-image' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    const m = typeof body.dataUrl === 'string' && body.dataUrl.match(/^data:image\/([a-z0-9.+-]+);base64,(.+)$/i)
+    if (!m) return sendJson(res, 400, { error: 'no image data' })
+    const ext = m[1].toLowerCase().replace('jpeg', 'jpg').replace(/[^a-z0-9]/g, '') || 'png'
+    try {
+      await mkdir(ART_DIR, { recursive: true })
+      const name = 'art-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8) + '.' + ext
+      await writeFile(join(ART_DIR, name), Buffer.from(m[2], 'base64'))
+      return sendJson(res, 200, { url: 'art/' + name })
+    } catch (e) {
+      return sendJson(res, 502, { error: 'could not save image: ' + e.message })
     }
   }
 

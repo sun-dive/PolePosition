@@ -84,6 +84,7 @@ body.rich-mode .rich-editor {
 .preview-body { flex: 1 1 auto; overflow: auto; padding-right: 6px; }
 .preview-body h1, .preview-body h2, .preview-body h3, .preview-body h4 { line-height: 1.25; }
 .preview-body a { color: var(--accent); }
+.preview-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; display: block; }
 .preview-body hr { border: 0; border-top: 1px solid var(--line); }
 
 .statusbar { padding: 7px 16px; border-top: 1px solid var(--line); font-size: 12px; }
