@@ -517,7 +517,8 @@ $('coverFile').onchange = e => {
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
 const ART_TEMPLATES = [
-  ['Match my cover (gold on charcoal)', 'flat modern editorial illustration, warm gold and amber on deep charcoal, soft glow accents, clean minimal shapes, consistent thin gold line work, premium and cohesive, no text'],
+  ['Gold glow on charcoal (signature)', 'luminous illustration in warm gold and amber glowing on a deep charcoal near-black background, soft floating light particles and a gentle glow, flat shapes with subtle depth, premium and cinematic with a touch of magic, elegant and cohesive, no text'],
+  ['Blue isometric tech', 'clean isometric flat-vector illustration on a deep blue and teal background, softly glowing accent icons arranged with subtle highlights and depth, a modern tech aesthetic, crisp and cohesive, no text'],
   ['Flat vector', 'clean flat vector illustration, bold simple shapes, a limited harmonious palette, crisp edges, modern and minimal, no text'],
   ['Editorial line art', 'minimal single-weight line-art illustration on a light off-white background, one restrained accent colour, elegant and airy, no text'],
   ['Soft 3D render', 'soft rounded 3D render, gentle studio lighting, smooth matte materials, pastel palette, friendly and clean, no text'],
