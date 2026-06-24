@@ -215,6 +215,21 @@ $('chapterTitle').oninput = e => { active().title = e.target.value; renderChapte
 $('chapterBody').oninput = e => { active().body = e.target.value; renderPreview(); save(); recordSoon() }
 $('btnAddChapter').onclick = addChapter
 $('btnExport').onclick = exportDraft
+async function exportEpub () {
+  flushRich()
+  $('btnEpub').disabled = true; flash('Building EPUB…')
+  try {
+    const r = await fetch('/api/epub', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(book) })
+    if (!r.ok) { const d = await r.json().catch(() => ({})); flash('EPUB: ' + (d.error || ('error ' + r.status))); return }
+    const blob = await r.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = (book.title || 'book').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.epub'
+    a.click(); URL.revokeObjectURL(a.href); flash('EPUB downloaded.')
+  } catch (e) { flash('EPUB build failed — is the server running? ' + e.message) }
+  finally { $('btnEpub').disabled = false }
+}
+$('btnEpub').onclick = exportEpub
 $('btnImport').onclick = () => $('importFile').click()
 $('importFile').onchange = e => { if (e.target.files[0]) importDraft(e.target.files[0]) }
 $('projectSelect').onchange = e => switchProject(e.target.value)

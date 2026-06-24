@@ -9,6 +9,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { query } from '@anthropic-ai/claude-agent-sdk'
+import { buildEpub } from './epub.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = join(HERE, 'public')
@@ -202,6 +203,20 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, { dataUrl })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'image generation failed' })
+    }
+  }
+
+  // ── EPUB export (P4) ──
+  if (url.pathname === '/api/epub' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    if (!body || !Array.isArray(body.chapters) || !body.chapters.length) return sendJson(res, 400, { error: 'no book to export' })
+    try {
+      const buf = await buildEpub(body, { artDir: ART_DIR, modified: new Date().toISOString() })
+      res.writeHead(200, { 'content-type': 'application/epub+zip', 'content-disposition': 'attachment; filename="book.epub"' })
+      res.end(buf)
+    } catch (e) {
+      return sendJson(res, 500, { error: 'EPUB build failed: ' + e.message })
     }
   }
 
