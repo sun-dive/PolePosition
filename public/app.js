@@ -85,6 +85,17 @@ function newProject () {
   loadActiveIntoEditor()
   flash('New book created — start writing.')
 }
+function duplicateProject () {
+  flushRich(); saveNow()
+  const copy = JSON.parse(JSON.stringify(book))
+  copy.title = (copy.title || 'Untitled') + ' (copy)'
+  const id = pid()
+  projects.list.push({ id, name: copy.title }); projects.activeId = id; persistIndex()
+  try { localStorage.setItem(bookKey(id), JSON.stringify(copy)) } catch {}
+  book = copy
+  loadActiveIntoEditor()
+  flash('Duplicated — you’re editing the copy; the original is untouched.')
+}
 function deleteProject () {
   if (projects.list.length === 1) { flash('You need at least one book.'); return }
   const e = projects.list.find(p => p.id === projects.activeId)
@@ -280,6 +291,7 @@ $('btnImport').onclick = () => $('importFile').click()
 $('importFile').onchange = e => { if (e.target.files[0]) importDraft(e.target.files[0]) }
 $('projectSelect').onchange = e => switchProject(e.target.value)
 $('btnNewProject').onclick = newProject
+$('btnDupProject').onclick = duplicateProject
 $('btnDeleteProject').onclick = deleteProject
 
 /* ---- AI writing assist (P2): draft / continue / rewrite / outline via the local /api/write proxy ---- */
