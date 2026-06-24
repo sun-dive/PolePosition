@@ -516,14 +516,26 @@ $('coverFile').onchange = e => {
 
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
-function openArt () { $('artModal').hidden = false }
+const ART_TEMPLATES = [
+  ['Match my cover (gold on charcoal)', 'flat modern editorial illustration, warm gold and amber on deep charcoal, soft glow accents, clean minimal shapes, consistent thin gold line work, premium and cohesive, no text'],
+  ['Flat vector', 'clean flat vector illustration, bold simple shapes, a limited harmonious palette, crisp edges, modern and minimal, no text'],
+  ['Editorial line art', 'minimal single-weight line-art illustration on a light off-white background, one restrained accent colour, elegant and airy, no text'],
+  ['Soft 3D render', 'soft rounded 3D render, gentle studio lighting, smooth matte materials, pastel palette, friendly and clean, no text'],
+  ['Watercolour', 'soft watercolour illustration, gentle washes, subtle paper texture, a muted palette, hand-painted feel, no text'],
+  ['Isometric infographic', 'clean isometric infographic illustration, flat shading, simple clear icons, a bright cohesive palette, diagram-like, no text']
+]
+function initArtTemplates () {
+  const sel = $('artStyleTemplate'); sel.innerHTML = '<option value="">— load a style template —</option>'
+  ART_TEMPLATES.forEach(([name, style]) => { const o = document.createElement('option'); o.value = style; o.textContent = name; sel.appendChild(o) })
+}
+function openArt () { $('artStyle').value = book.artStyle || ''; $('artModal').hidden = false }
 function closeArt () { $('artModal').hidden = true }
 async function optimizeArtPrompt () {
   const description = $('artDesc').value.trim()
   if (!description) { $('artOptStatus').textContent = 'Describe it first.'; return }
   $('artOptimize').disabled = true; $('artOptStatus').textContent = 'Claude is writing the prompt…'
   try {
-    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'inline' }) })
+    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'inline', style: $('artStyle').value.trim() }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artOptStatus').textContent = data.error || ('Error ' + r.status); return }
     $('artPrompt').value = (data.prompt || '').trim(); $('artOptStatus').textContent = 'Prompt ready — tweak it or Generate.'
@@ -531,8 +543,10 @@ async function optimizeArtPrompt () {
   finally { $('artOptimize').disabled = false }
 }
 async function generateArt () {
-  const prompt = $('artPrompt').value.trim()
-  if (!prompt) { $('artStatus').textContent = 'Describe/optimize a prompt first.'; return }
+  const base = $('artPrompt').value.trim()
+  if (!base) { $('artStatus').textContent = 'Describe/optimize a prompt first.'; return }
+  const style = $('artStyle').value.trim()
+  const prompt = style ? `${base}\n\nArt style (apply consistently): ${style}` : base
   $('artGen').disabled = true; $('artStatus').textContent = 'Generating… (can take 20–40s)'
   try {
     const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: $('artAspect').value }) })
@@ -610,6 +624,9 @@ $('artFile').onchange = e => {
   rd.onload = () => { artData = rd.result; $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = 'Image loaded — insert or refine it.' }
   rd.readAsDataURL(f); e.target.value = ''
 }
+$('artStyle').oninput = e => { book.artStyle = e.target.value; save() }
+$('artStyleTemplate').onchange = e => { if (e.target.value) { $('artStyle').value = e.target.value; book.artStyle = e.target.value; save() } e.target.value = '' }
+initArtTemplates()
 
 renderProjects()
 renderChapters(); renderEditor()

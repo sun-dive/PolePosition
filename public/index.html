@@ -118,6 +118,12 @@
     <div class="modal-box">
       <div class="modal-head"><b>🖼️ Chapter art</b><button id="artClose" class="ghost" type="button">✕</button></div>
       <p class="dim" style="font-size:12px;margin:0 0 6px">Describe it simply — Claude writes the prompt, nano-banana generates it, and “Insert” drops it into the current chapter.</p>
+      <label class="dim" style="font-size:12px">House style — applied to every image (set once per book, for consistency)</label>
+      <input id="artStyle" class="title-in" style="width:100%; margin:0 0 6px" placeholder="e.g. flat vector, warm gold on charcoal, soft glow, no text" />
+      <div class="row" style="margin:0 0 12px; gap:8px; align-items:center">
+        <select id="artStyleTemplate" class="project-select" title="Load a style template"></select>
+        <span class="dim" style="font-size:12px">↤ load a template into the field</span>
+      </div>
       <label class="dim" style="font-size:12px">Describe the illustration</label>
       <input id="artDesc" class="title-in" style="width:100%; margin-bottom:6px" placeholder="e.g. a clean flat infographic of a flywheel; or a friendly robot at a desk" />
       <div class="row" style="margin:0 0 10px; gap:8px; align-items:center"><button id="artOptimize" class="ai-btn" type="button">✨ Optimize prompt</button><span id="artOptStatus" class="dim"></span></div>
