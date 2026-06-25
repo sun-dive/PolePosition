@@ -307,12 +307,17 @@ async function aiGenerate (mode) {
   aiSel = richMode ? null : { start: body.selectionStart, end: body.selectionEnd }
   const selection = richMode ? '' : body.value.slice(aiSel.start, aiSel.end)
   const chapterText = richMode ? active().body : body.value
+  // Optionally hand the AI the rest of the book (every other chapter) so new writing stays consistent
+  // with what's already written — e.g. a solution chapter that references the problem set up earlier.
+  const bookContext = ($('aiWholeBook') && $('aiWholeBook').checked)
+    ? book.chapters.filter(c => c.id !== book.activeId).map(c => `## ${c.title || 'Untitled'}\n${(c.body || '').trim()}`).join('\n\n').trim()
+    : ''
   if (mode === 'rewrite' && !selection.trim()) { flash('Select some text in the editor to rewrite first.'); return }
   setAiBusy(true); flash('Writing…')
   try {
     const r = await fetch('/api/write', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode, instruction: $('aiPrompt').value.trim(), chapterText, selection, title: book.title, author: book.author })
+      body: JSON.stringify({ mode, instruction: $('aiPrompt').value.trim(), chapterText, selection, title: book.title, author: book.author, bookContext })
     })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { flash('AI: ' + (data.error || ('error ' + r.status))); return }
@@ -352,6 +357,11 @@ $('aiInsert').onclick = () => applyText(aiSel?.start ?? 0, aiSel?.start ?? 0, ai
 $('aiReplace').onclick = () => applyText(aiSel?.start ?? 0, aiSel?.end ?? 0, aiResult)
 $('aiAppend').onclick = () => { const b = $('chapterBody'); applyText(b.value.length, b.value.length, aiResult) }
 $('aiDiscard').onclick = () => { hideAiResult(); flash('Discarded.') }
+// Remember the "Whole book" context preference across sessions.
+if ($('aiWholeBook')) {
+  $('aiWholeBook').checked = localStorage.getItem('polepos:aiwhole') === '1'
+  $('aiWholeBook').onchange = e => { try { localStorage.setItem('polepos:aiwhole', e.target.checked ? '1' : '0') } catch {} }
+}
 
 /* ---- Markdown formatting toolbar (no MD knowledge needed) ---- */
 function commitBody () { active().body = $('chapterBody').value; renderPreview(); save(); recordNow() }
@@ -714,3 +724,111 @@ recordNow() // seed history with the loaded state
 setModeButtons()
 updateCoverButton()
 if ((localStorage.getItem(MODEKEY) || 'rich') !== 'md') enterRich()
+
+/* ---- Book Factory (stage 1: faster drafting) — brief → outline → full first draft → new book ----
+   Keeps you in control: you review/edit the outline, then it drafts every chapter into a fresh book
+   you can read, edit and illustrate as usual. The brief box is the seam a future niche-research step
+   feeds; the finished book flows on to export + mint. */
+let briefData = { title: '', subtitle: '', chapters: [] } // chapters: [{ title, synopsis }]
+
+function openBrief () {
+  $('briefStep1').hidden = false; $('briefStep2').hidden = true
+  $('briefStatus1').textContent = ''; $('briefStatus2').textContent = ''
+  $('briefProgress').hidden = true
+  $('briefModal').hidden = false
+}
+function closeBrief () { $('briefModal').hidden = true }
+
+function renderBriefChapters () {
+  const ol = $('briefChapterList'); ol.innerHTML = ''
+  briefData.chapters.forEach((c, i) => {
+    const li = document.createElement('li'); li.className = 'brief-ch'
+    li.innerHTML =
+      `<span class="brief-ch-num">${i + 1}</span>` +
+      '<div class="brief-ch-fields"><input class="bch-title" placeholder="Chapter title" /><textarea class="bch-syn" rows="2" placeholder="What this chapter delivers"></textarea></div>' +
+      '<div class="brief-ch-ctl"><button class="ghost bch-up" type="button" title="Move up">↑</button><button class="ghost bch-down" type="button" title="Move down">↓</button><button class="ghost bch-del" type="button" title="Remove">✕</button></div>'
+    const ti = li.querySelector('.bch-title'), sy = li.querySelector('.bch-syn')
+    ti.value = c.title || ''; sy.value = c.synopsis || ''
+    ti.oninput = e => { c.title = e.target.value }
+    sy.oninput = e => { c.synopsis = e.target.value }
+    li.querySelector('.bch-up').onclick = () => { if (i > 0) { const a = briefData.chapters; [a[i - 1], a[i]] = [a[i], a[i - 1]]; renderBriefChapters() } }
+    li.querySelector('.bch-down').onclick = () => { const a = briefData.chapters; if (i < a.length - 1) { [a[i + 1], a[i]] = [a[i], a[i + 1]]; renderBriefChapters() } }
+    li.querySelector('.bch-del').onclick = () => { briefData.chapters.splice(i, 1); renderBriefChapters() }
+    ol.appendChild(li)
+  })
+}
+
+async function briefGenerateOutline () {
+  const brief = $('briefText').value.trim()
+  if (!brief) { $('briefStatus1').textContent = 'Write a brief first.'; return }
+  $('briefOutline').disabled = true; $('briefStatus1').textContent = 'Designing the outline…'
+  try {
+    const r = await fetch('/api/outline', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ brief, chapters: Number($('briefChapters').value) || 8, voice: $('briefVoice').value.trim() })
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('briefStatus1').textContent = 'Outline: ' + (data.error || ('error ' + r.status)); return }
+    briefData = { title: data.title || '', subtitle: data.subtitle || '', chapters: Array.isArray(data.chapters) ? data.chapters : [] }
+    $('briefTitle').value = briefData.title
+    $('briefSubtitle').value = briefData.subtitle
+    renderBriefChapters()
+    $('briefStep1').hidden = true; $('briefStep2').hidden = false
+    $('briefStatus2').textContent = 'Tweak the outline, then draft.'
+  } catch (e) {
+    $('briefStatus1').textContent = 'Outline failed — is the server running? ' + e.message
+  } finally { $('briefOutline').disabled = false }
+}
+
+// Build a brand-new project from the drafted chapters (mirrors newProject(), with content).
+function createBookFromDraft (title, subtitle, chapters) {
+  flushRich(); saveNow()
+  const id = pid()
+  const b = { title: title || 'Untitled', author: '', activeId: null,
+    chapters: chapters.map(c => ({ id: uid(), title: c.title || 'Untitled chapter', body: c.body || '' })) }
+  if (subtitle) b.subtitle = subtitle
+  normalize(b)
+  projects.list.push({ id, name: b.title }); projects.activeId = id; persistIndex()
+  try { localStorage.setItem(bookKey(id), JSON.stringify(b)) } catch {}
+  book = b
+  loadActiveIntoEditor()
+}
+
+async function briefDraftAll () {
+  if (!briefData.chapters.length) { $('briefStatus2').textContent = 'Add at least one chapter.'; return }
+  const title = $('briefTitle').value.trim() || briefData.title || 'Untitled'
+  const subtitle = $('briefSubtitle').value.trim()
+  const voice = $('briefVoice').value.trim()
+  const chapters = briefData.chapters.map(c => ({ title: (c.title || '').trim() || 'Untitled chapter', synopsis: (c.synopsis || '').trim() }))
+  $('briefDraft').disabled = true; $('briefBack').disabled = true; $('briefOutline').disabled = true
+  const prog = $('briefProgress'), bar = $('briefProgressBar'); prog.hidden = false; bar.style.width = '0%'
+  const drafted = []
+  try {
+    for (let i = 0; i < chapters.length; i++) {
+      $('briefStatus2').textContent = `Drafting ${i + 1}/${chapters.length}: ${chapters[i].title}…`
+      const r = await fetch('/api/draft-chapter', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, voice, outline: chapters, index: i })
+      })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) { $('briefStatus2').textContent = `Stopped at ${i + 1}/${chapters.length}: ` + (data.error || ('error ' + r.status)); return }
+      drafted.push({ title: chapters[i].title, body: (data.text || '').trim() })
+      bar.style.width = Math.round(((i + 1) / chapters.length) * 100) + '%'
+    }
+    createBookFromDraft(title, subtitle, drafted)
+    closeBrief()
+    flash(`Drafted “${title}” — ${drafted.length} chapters. Read, edit, add a cover & art, then export.`)
+  } catch (e) {
+    $('briefStatus2').textContent = 'Draft failed — is the server running? ' + e.message
+  } finally {
+    $('briefDraft').disabled = false; $('briefBack').disabled = false; $('briefOutline').disabled = false
+  }
+}
+
+$('btnBrief').onclick = openBrief
+$('briefClose').onclick = closeBrief
+$('briefModal').addEventListener('click', e => { if (e.target === $('briefModal')) closeBrief() })
+$('briefOutline').onclick = briefGenerateOutline
+$('briefBack').onclick = () => { $('briefStep1').hidden = false; $('briefStep2').hidden = true }
+$('briefAddCh').onclick = () => { briefData.chapters.push({ title: '', synopsis: '' }); renderBriefChapters() }
+$('briefDraft').onclick = briefDraftAll

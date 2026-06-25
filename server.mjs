@@ -41,14 +41,60 @@ const SYSTEM = 'You are a skilled co-author helping write an ebook. Write engagi
 
 const IMG_PROMPT_SYSTEM = 'You are an expert prompt engineer for the fal.ai nano-banana (Google Gemini) text-to-image model, specializing in premium ebook covers and book illustrations. Given a short description, write ONE vivid, well-structured image prompt (3–6 sentences) covering subject and composition, art style, lighting, colour palette, and mood. For any words that must appear in the image, quote the EXACT text in double quotes and call for crisp, legible, well-kerned lettering. Aim for professional, marketable results. Output ONLY the final prompt — no preamble, no surrounding quotes, no commentary.'
 
-function buildPrompt ({ mode, instruction, chapterText, selection, title, author }) {
+// Book Factory (stage 1: fast drafting). An outline architect + a chapter ghostwriter, both on the
+// subscription via generate(). The `brief` is the seam a future niche-research step will fill in.
+const OUTLINE_SYSTEM = 'You are a professional book architect and commissioning editor. Given a brief, design a coherent, sellable ebook. Output ONLY valid JSON (no markdown, no code fences, no commentary) of the exact form {"title": string, "subtitle": string, "chapters": [{"title": string, "synopsis": string}]}. The title must be specific and marketable — not generic. Each synopsis is 1–2 sentences stating what that chapter delivers to the reader. Order the chapters as a logical arc with no overlap or repetition.'
+const CHAPTER_SYSTEM = 'You are a skilled ghostwriter drafting ONE complete chapter of an ebook. Write engaging, well-structured Markdown prose — use ## subheadings, short paragraphs, and lists where they genuinely help. Do NOT restate the chapter title as a heading (it is added separately). No preamble, no author note, no meta-commentary. Output ONLY the chapter prose as Markdown.'
+
+// Tolerant JSON extraction — strips code fences and falls back to the outermost braces.
+function parseJsonLoose (s) {
+  if (!s) return null
+  const t = s.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+  try { return JSON.parse(t) } catch {}
+  const a = t.indexOf('{'), b = t.lastIndexOf('}')
+  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)) } catch {} }
+  return null
+}
+
+async function generateOutline ({ brief, chapters, voice }) {
+  const n = Math.min(Math.max(Number(chapters) || 8, 1), 30)
+  const voiceNote = voice ? `\n\nVoice / tone: ${voice}.` : ''
+  const raw = await generate(`Design an ebook from this brief. Aim for about ${n} chapters.${voiceNote}\n\nBrief:\n"""\n${String(brief).slice(0, 4000)}\n"""`, OUTLINE_SYSTEM)
+  const j = parseJsonLoose(raw)
+  if (!j || !Array.isArray(j.chapters) || !j.chapters.length) throw new Error('The model did not return a usable outline — try again or refine the brief.')
+  return {
+    title: String(j.title || '').trim(),
+    subtitle: String(j.subtitle || '').trim(),
+    chapters: j.chapters.slice(0, 40).map(c => ({ title: String(c.title || '').trim() || 'Untitled chapter', synopsis: String(c.synopsis || '').trim() }))
+  }
+}
+
+async function draftChapter ({ title, author, voice, outline, index }) {
+  const list = Array.isArray(outline) ? outline : []
+  const i = Math.min(Math.max(Number(index) || 0, 0), list.length - 1)
+  const ch = list[i] || { title: 'Chapter', synopsis: '' }
+  const toc = list.map((c, k) => `${k + 1}. ${c.title}${c.synopsis ? ' — ' + c.synopsis : ''}`).join('\n')
+  const voiceNote = voice ? `\nVoice / tone: ${voice}.` : ''
+  const prompt = `Book: "${title || 'Untitled'}"${author ? ` by ${author}` : ''}.${voiceNote}\n\n` +
+    `Full table of contents (for context — write only the requested chapter, don't reproduce the others):\n${toc}\n\n` +
+    `Write Chapter ${i + 1}: "${ch.title}".\nWhat it must deliver: ${ch.synopsis || 'develop the topic clearly and engagingly.'}\n\n` +
+    `Write the full chapter now — consistent with the book's arc, picking up logically from earlier chapters and not repeating them.`
+  return generate(prompt, CHAPTER_SYSTEM)
+}
+
+function buildPrompt ({ mode, instruction, chapterText, selection, title, author, bookContext }) {
   const head = `Book: "${title || 'Untitled'}"${author ? ` by ${author}` : ''}.`
+  // Optional: the rest of the book (other chapters) so new writing stays consistent with what's there
+  // — e.g. a solution chapter that builds on the problem laid out earlier. Capped to bound the payload.
+  const bookCtx = bookContext && bookContext.trim()
+    ? `\n\nThe rest of the book so far (other chapters — for context & consistency; do NOT repeat or rewrite them):\n"""\n${bookContext.slice(-12000)}\n"""`
+    : ''
   const ctx = chapterText && chapterText.trim() ? `\n\nThe chapter so far (for context, do not repeat it):\n"""\n${chapterText.slice(-6000)}\n"""` : ''
   switch (mode) {
-    case 'continue': return `${head}\n\nContinue this chapter naturally from where it ends, in the same voice.${instruction ? ` Direction: ${instruction}.` : ''}${ctx}`
-    case 'rewrite': return `${head}\n\nRewrite the passage below.${instruction ? ` Instruction: ${instruction}.` : ' Improve clarity, flow and vividness while keeping the meaning.'}\n\nPassage:\n"""\n${selection || ''}\n"""`
-    case 'outline': return `${head}\n\nCreate a clear, structured outline as a Markdown bullet list for: ${instruction || 'this book'}.`
-    default: return `${head}\n\nWrite the following${instruction ? `: ${instruction}` : ' section'}.${ctx}`
+    case 'continue': return `${head}${bookCtx}\n\nContinue this chapter naturally from where it ends, in the same voice.${instruction ? ` Direction: ${instruction}.` : ''}${ctx}`
+    case 'rewrite': return `${head}${bookCtx}\n\nRewrite the passage below.${instruction ? ` Instruction: ${instruction}.` : ' Improve clarity, flow and vividness while keeping the meaning.'}\n\nPassage:\n"""\n${selection || ''}\n"""`
+    case 'outline': return `${head}${bookCtx}\n\nCreate a clear, structured outline as a Markdown bullet list for: ${instruction || 'this book'}.`
+    default: return `${head}${bookCtx}\n\nWrite the following${instruction ? `: ${instruction}` : ' section'}.${ctx}`
   }
 }
 
@@ -217,6 +263,33 @@ const server = createServer(async (req, res) => {
       return res.end(buf)
     } catch (e) {
       return sendJson(res, 500, { error: 'EPUB build failed: ' + e.message })
+    }
+  }
+
+  // ── Book Factory: brief → outline (Claude Agent SDK, subscription) ──
+  if (url.pathname === '/api/outline' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    if (!body.brief || !String(body.brief).trim()) return sendJson(res, 400, { error: 'Describe the book / niche first.' })
+    try {
+      const outline = await generateOutline({ brief: String(body.brief).trim(), chapters: body.chapters, voice: typeof body.voice === 'string' ? body.voice.trim() : '' })
+      return sendJson(res, 200, outline)
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message || 'outline failed' })
+    }
+  }
+
+  // ── Book Factory: outline + index → one drafted chapter (Claude Agent SDK, subscription) ──
+  if (url.pathname === '/api/draft-chapter' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    if (!Array.isArray(body.outline) || !body.outline.length) return sendJson(res, 400, { error: 'no outline to draft from' })
+    try {
+      const text = await draftChapter({ title: body.title, author: body.author, voice: typeof body.voice === 'string' ? body.voice.trim() : '', outline: body.outline, index: body.index })
+      if (!text) return sendJson(res, 502, { error: 'The model returned no text — try again.' })
+      return sendJson(res, 200, { text })
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message || 'chapter draft failed' })
     }
   }
 

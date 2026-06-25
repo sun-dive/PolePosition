@@ -30,6 +30,7 @@
 
   <section class="meta">
     <select id="projectSelect" class="project-select" title="Switch book"></select>
+    <button id="btnBrief" class="ghost" type="button" title="Draft a whole first draft from a one-line brief">✨ Draft from brief</button>
     <button id="btnNewProject" class="ghost" type="button" title="New book">+ New</button>
     <button id="btnDupProject" class="ghost" type="button" title="Duplicate this book (independent copy)">⧉ Copy</button>
     <button id="btnDeleteProject" class="ghost" type="button" title="Delete this book">🗑</button>
@@ -67,6 +68,7 @@
           <button id="aiContinue" class="ai-btn" type="button" title="Continue this chapter">➡️ Continue</button>
           <button id="aiRewrite" class="ai-btn" type="button" title="Rewrite the selected text">🔁 Rewrite</button>
           <button id="aiOutline" class="ai-btn" type="button" title="Outline from your prompt">📋 Outline</button>
+          <label id="aiWholeBookLbl" class="ai-context-toggle" title="Give the AI your other chapters as context, so new writing stays consistent with the rest of the book (e.g. a solution chapter that builds on the problem)"><input id="aiWholeBook" type="checkbox" /> Whole book</label>
         </div>
         <div id="aiResult" class="ai-result" hidden>
           <pre id="aiResultText" class="ai-result-text"></pre>
@@ -88,6 +90,45 @@
   </main>
 
   <footer class="statusbar"><span id="status" class="dim">Draft autosaves to this browser.</span></footer>
+
+  <div id="briefModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:560px">
+      <div class="modal-head"><b>✨ Draft a book from a brief</b><button id="briefClose" class="ghost" type="button">✕</button></div>
+
+      <!-- Step 1: the brief -->
+      <div id="briefStep1">
+        <p class="dim" style="font-size:12px;margin:0 0 8px">Describe the book or the niche / problem it solves. Claude designs a title + chapter outline, then drafts every chapter into a new book you can edit. (Claude = your subscription.)</p>
+        <label class="dim" style="font-size:12px">Brief — topic, target reader, the problem it solves</label>
+        <textarea id="briefText" class="cover-prompt" rows="4" placeholder="e.g. A practical guide for first-time etsy sellers who can't get their first sale — the exact listing, pricing and photo fixes that get found and bought, in a weekend."></textarea>
+        <div class="row" style="margin-top:8px; gap:10px; align-items:center; flex-wrap:wrap">
+          <label class="dim" style="font-size:12px">Chapters <input id="briefChapters" type="number" min="1" max="30" value="8" style="width:56px" class="title-in" /></label>
+          <label class="dim" style="font-size:12px; flex:1; min-width:160px">Voice / tone (optional) <input id="briefVoice" class="title-in" style="width:100%" placeholder="e.g. friendly, plain-spoken, no fluff" /></label>
+        </div>
+        <div class="row" style="margin-top:10px; gap:8px; align-items:center">
+          <button id="briefOutline" class="ai-btn" type="button">📋 Generate outline</button>
+          <span id="briefStatus1" class="dim"></span>
+        </div>
+      </div>
+
+      <!-- Step 2: review the outline, then draft -->
+      <div id="briefStep2" hidden>
+        <label class="dim" style="font-size:12px">Title (edit freely)</label>
+        <input id="briefTitle" class="title-in" style="width:100%; margin-bottom:4px" placeholder="Book title" />
+        <input id="briefSubtitle" class="author-in" style="width:100%; margin-bottom:8px" placeholder="Subtitle (optional)" />
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:4px">
+          <label class="dim" style="font-size:12px">Chapters — edit titles &amp; synopses, reorder or remove</label>
+          <button id="briefAddCh" class="ghost" type="button" title="Add a chapter">+ Add</button>
+        </div>
+        <ol id="briefChapterList" class="brief-ch-list"></ol>
+        <div class="row" style="margin-top:10px; gap:8px; align-items:center; flex-wrap:wrap">
+          <button id="briefDraft" class="ai-btn" type="button">✍️ Draft all chapters → new book</button>
+          <button id="briefBack" class="ghost" type="button">← Back to brief</button>
+          <span id="briefStatus2" class="dim"></span>
+        </div>
+        <div id="briefProgress" class="brief-progress" hidden><div id="briefProgressBar" class="brief-progress-bar"></div></div>
+      </div>
+    </div>
+  </div>
 
   <div id="coverModal" class="modal" hidden>
     <div class="modal-box">
