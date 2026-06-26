@@ -581,6 +581,33 @@ async function editCover () {
     $('coverEditStatus').textContent = 'Request failed — is the server running? ' + e.message
   } finally { $('coverEdit').disabled = false }
 }
+
+let coverAnimData = '' // last animated cover (data URL — webp or gif)
+async function animateCover () {
+  if (!coverData) { $('coverAnimStatus').textContent = 'Generate or open an image first.'; return }
+  const prompt = $('coverAnimPrompt').value.trim()
+  $('coverAnimate').disabled = true
+  $('coverAnimStatus').textContent = 'Animating… (image→video can take a minute or two)'
+  try {
+    const r = await fetch('/api/animate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: coverData, prompt }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('coverAnimStatus').textContent = data.error || ('Error ' + r.status); return }
+    coverAnimData = data.dataUrl
+    $('coverAnimImg').src = coverAnimData; $('coverAnimResult').hidden = false
+    $('coverAnimStatus').textContent = 'Done (' + (data.ext || 'webp') + ') — download it, then embed it as the FLAC cover in Kid3.'
+  } catch (e) {
+    $('coverAnimStatus').textContent = 'Request failed — is the server running? ' + e.message
+  } finally { $('coverAnimate').disabled = false }
+}
+function downloadCoverAnim () {
+  if (!coverAnimData) return
+  const ext = coverAnimData.slice(5, coverAnimData.indexOf(';')).split('/')[1] || 'webp'
+  const a = document.createElement('a')
+  a.href = coverAnimData
+  a.download = (book.title || 'cover').replace(/[^\w.-]+/g, '_') + '-animated.' + ext
+  a.click()
+}
+
 $('coverOptimize').onclick = optimizeCoverPrompt
 $('coverEdit').onclick = editCover
 $('btnCover').onclick = openCover
@@ -589,6 +616,8 @@ $('coverModal').addEventListener('click', e => { if (e.target === $('coverModal'
 $('coverGen').onclick = generateCover
 $('coverUse').onclick = useCover
 $('coverDownload').onclick = downloadCover
+$('coverAnimate').onclick = animateCover
+$('coverAnimDownload').onclick = downloadCoverAnim
 $('coverOpen').onclick = () => $('coverFile').click()
 $('coverFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return

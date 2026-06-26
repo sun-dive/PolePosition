@@ -154,6 +154,14 @@
         <label class="dim" style="font-size:12px; margin-top:10px; display:block">Refine THIS image (nano-banana edit — keeps the composition)</label>
         <input id="coverEditInstr" class="title-in" style="width:100%" placeholder="e.g. add &quot;Tommy Telford&quot; in small text near the bottom" />
         <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="coverEdit" class="ai-btn" type="button">✏️ Edit image</button><span id="coverEditStatus" class="dim"></span></div>
+
+        <label class="dim" style="font-size:12px; margin-top:14px; display:block">🎬 Animate THIS image → looping cover (fal image-to-video → animated WebP). Describe the motion; keep it subtle.</label>
+        <input id="coverAnimPrompt" class="title-in" style="width:100%" placeholder="e.g. gentle drifting mist, slow flicker of the streetlight, faint camera drift" />
+        <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="coverAnimate" class="ai-btn" type="button">🎬 Animate</button><span id="coverAnimStatus" class="dim"></span></div>
+        <div id="coverAnimResult" hidden style="margin-top:8px">
+          <img id="coverAnimImg" alt="animated cover preview" style="max-width:100%; border-radius:6px" />
+          <div class="cover-actions" style="margin-top:6px"><button id="coverAnimDownload" class="ghost" type="button">Download animation</button></div>
+        </div>
       </div>
     </div>
   </div>

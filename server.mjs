@@ -10,6 +10,9 @@ import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildEpub } from './epub.mjs'
+import { spawn } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { unlink } from 'node:fs/promises'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = join(HERE, 'public')
@@ -36,6 +39,9 @@ if (process.env.ANTHROPIC_API_KEY) {
 }
 const MODEL = process.env.CLAUDE_MODEL || undefined // optional, e.g. claude-opus-4-8; default = subscription default
 const FAL_MODEL = process.env.FAL_MODEL || 'fal-ai/nano-banana' // P3 image model (nano-banana = great at text; override via .env)
+// Image-to-video model for "Animate cover". veo2 is confirmed-working but ~$0.50/sec; override FAL_VIDEO_MODEL
+// in .env with a cheaper fast variant (Kling Turbo / Hailuo Fast / LTX) — endpoint id from fal.ai/explore.
+const FAL_VIDEO_MODEL = process.env.FAL_VIDEO_MODEL || 'fal-ai/veo2/image-to-video'
 
 const SYSTEM = 'You are a skilled co-author helping write an ebook. Write engaging, clear prose that matches the existing tone and style. Output ONLY the requested content as Markdown — no preamble, no explanations, no meta-commentary, no surrounding quotes.'
 
@@ -178,6 +184,68 @@ async function falImage ({ prompt, model, aspectRatio, width, height, imageUrls 
   return 'data:' + ct + ';base64,' + buf.toString('base64')
 }
 
+// "Animate cover": send a still image to a fal IMAGE-TO-VIDEO model → get a short MP4 back (downloaded here).
+async function falImageToVideo ({ image, prompt }) {
+  const key = process.env.FAL_API_KEY
+  if (!key) throw new Error('FAL_API_KEY isn’t set — add it to your local .env to animate.')
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 300000) // video generation can take a minute or two
+  let res
+  try {
+    res = await fetch('https://fal.run/' + FAL_VIDEO_MODEL, {
+      method: 'POST',
+      headers: { authorization: 'Key ' + key, 'content-type': 'application/json' },
+      body: JSON.stringify({ image_url: image, prompt }),
+      signal: ctrl.signal
+    })
+  } catch (e) {
+    throw new Error(e.name === 'AbortError' ? 'fal.ai timed out — video takes longer; try a faster/cheaper FAL_VIDEO_MODEL.' : ('fal.ai request failed: ' + e.message))
+  } finally { clearTimeout(timer) }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const d = data && data.detail
+    throw new Error('fal.ai: ' + (typeof d === 'string' ? d : d ? JSON.stringify(d) : ('error ' + res.status)))
+  }
+  const vurl = data && data.video && data.video.url
+  if (!vurl) throw new Error('fal.ai returned no video — is FAL_VIDEO_MODEL an image-to-video model?')
+  const vidRes = await fetch(vurl)
+  return Buffer.from(await vidRes.arrayBuffer())
+}
+
+// Run ffmpeg with the given args; rejects with stderr tail on failure (or a clear message if ffmpeg is missing).
+function runFfmpeg (args) {
+  return new Promise((resolve, reject) => {
+    const p = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    let err = ''
+    p.stderr.on('data', d => { err += d })
+    p.on('error', e => reject(new Error('ffmpeg not found — install ffmpeg to convert the animation (' + e.message + ')')))
+    p.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg failed: ' + err.slice(-400))))
+  })
+}
+
+// MP4 → animated image data URL for an `<img>` cover: prefer animated WebP (small); fall back to GIF if this
+// ffmpeg lacks libwebp. Kept short/low-res so it's small enough to embed + ride on-chain.
+async function mp4ToAnimatedImage (mp4Buffer) {
+  const base = join(tmpdir(), 'pp-anim-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  const mp4 = base + '.mp4'
+  await writeFile(mp4, mp4Buffer)
+  const vf = 'fps=15,scale=512:-1:flags=lanczos'
+  try {
+    try {
+      const webp = base + '.webp'
+      await runFfmpeg(['-y', '-i', mp4, '-vcodec', 'libwebp', '-filter:v', vf, '-loop', '0', '-lossless', '0', '-q:v', '70', '-an', webp])
+      const buf = await readFile(webp); await unlink(webp).catch(() => {})
+      return { dataUrl: 'data:image/webp;base64,' + buf.toString('base64'), ext: 'webp' }
+    } catch {
+      const pal = base + '-pal.png', gif = base + '.gif'
+      await runFfmpeg(['-y', '-i', mp4, '-vf', vf + ',palettegen', pal])
+      await runFfmpeg(['-y', '-i', mp4, '-i', pal, '-lavfi', vf + '[x];[x][1:v]paletteuse', '-loop', '0', gif])
+      const buf = await readFile(gif); await unlink(gif).catch(() => {}); await unlink(pal).catch(() => {})
+      return { dataUrl: 'data:image/gif;base64,' + buf.toString('base64'), ext: 'gif' }
+    }
+  } finally { await unlink(mp4).catch(() => {}) }
+}
+
 function sendJson (res, code, obj) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
 function readJson (req) {
   return new Promise((resolve, reject) => {
@@ -249,6 +317,23 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, { dataUrl })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'image generation failed' })
+    }
+  }
+
+  // ── Animate a cover image (fal image-to-video → animated WebP/GIF for an <img> cover) ──
+  if (url.pathname === '/api/animate' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    if (typeof body.image !== 'string' || !body.image.startsWith('data:')) return sendJson(res, 400, { error: 'Generate or open a cover image first.' })
+    const prompt = (typeof body.prompt === 'string' && body.prompt.trim())
+      ? body.prompt.trim()
+      : 'Subtle, gentle ambient motion — slow drift, faint flicker — a calm, seamless loop. Keep the composition stable.'
+    try {
+      const mp4 = await falImageToVideo({ image: body.image, prompt })
+      const out = await mp4ToAnimatedImage(mp4)
+      return sendJson(res, 200, out)
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message || 'animation failed' })
     }
   }
 
