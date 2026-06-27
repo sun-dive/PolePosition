@@ -628,13 +628,48 @@ $('coverFile').onchange = e => {
 
 /* ---- Sequence clips → a looping animated WebP cover (add clip ×N each, choose frame rate) ---- */
 function renumberSeq () { Array.from($('seqList').children).forEach((li, i) => { li.querySelector('.seq-num').textContent = (i + 1) }) }
+// Read an animated WebP's total playback time (ms) by summing ANMF frame durations — no decode needed.
+function webpAnimDurationMs (buf) {
+  const dv = new DataView(buf)
+  if (dv.byteLength < 16 || dv.getUint32(0, false) !== 0x52494646 /*RIFF*/ || dv.getUint32(8, false) !== 0x57454250 /*WEBP*/) return null
+  let off = 12, total = 0, found = false
+  while (off + 8 <= dv.byteLength) {
+    const fourcc = dv.getUint32(off, false), size = dv.getUint32(off + 4, true), payload = off + 8
+    if (fourcc === 0x414e4d46 /*ANMF*/ && payload + 15 <= dv.byteLength) {
+      const ms = dv.getUint8(payload + 12) | (dv.getUint8(payload + 13) << 8) | (dv.getUint8(payload + 14) << 16) // 24-bit LE ms
+      total += Math.round(ms / 10) * 10 // ImageMagick re-times to centiseconds on output; match it so the estimate agrees with the build
+      found = true
+    }
+    off = payload + size + (size & 1) // chunks are even-padded
+  }
+  return found ? total : null
+}
+// Live loop-length estimate from each clip's parsed duration × its repeat — independent of frame rate.
+function updateSeqEstimate () {
+  let ms = 0, known = true
+  for (const li of Array.from($('seqList').children)) {
+    if (!li.querySelector('.seq-file').files[0]) continue
+    const d = parseInt(li.dataset.durMs || '0', 10), r = parseInt(li.querySelector('.seq-rep').value, 10) || 1
+    if (d > 0) ms += d * r; else known = false
+  }
+  $('seqEstimate').textContent = ms > 0 ? '≈ ' + (ms / 1000).toFixed(1) + 's loop' + (known ? '' : ' +') : ''
+}
 function addSeqStep () {
   const li = document.createElement('li'); li.className = 'seq-step'
   li.innerHTML = '<span class="seq-num"></span>' +
     '<input type="file" accept="image/*" class="seq-file" />' +
+    '<span class="seq-dur dim"></span>' +
     '<label class="dim" style="font-size:12px; white-space:nowrap">repeat ×<input type="number" class="seq-rep" min="1" max="50" value="1" /></label>' +
     '<button class="ghost seq-del" type="button" title="Remove">✕</button>'
-  li.querySelector('.seq-del').onclick = () => { li.remove(); renumberSeq() }
+  const file = li.querySelector('.seq-file'), durEl = li.querySelector('.seq-dur')
+  file.onchange = async () => {
+    li.dataset.durMs = '0'; durEl.textContent = ''
+    const f = file.files[0]; if (!f) { updateSeqEstimate(); return }
+    try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) { li.dataset.durMs = String(ms); durEl.textContent = (ms / 1000).toFixed(1) + 's' } } catch {}
+    updateSeqEstimate()
+  }
+  li.querySelector('.seq-rep').oninput = updateSeqEstimate
+  li.querySelector('.seq-del').onclick = () => { li.remove(); renumberSeq(); updateSeqEstimate() }
   $('seqList').append(li); renumberSeq()
 }
 function readFileDataUrl (file) {
@@ -657,7 +692,8 @@ async function buildSequenceClips () {
     seqResultData = data.dataUrl
     $('seqImg').src = seqResultData; $('seqResult').hidden = false
     const mb = data.size / 1048576
-    $('seqInfo').textContent = data.frames + ' frames · ' + mb.toFixed(2) + ' MB'
+    const dur = data.duration || 0
+    $('seqInfo').textContent = data.frames + ' frames · ' + dur.toFixed(1) + 's loop · ' + mb.toFixed(2) + ' MB'
     $('seqStatus').textContent = mb > 3
       ? 'Built (' + mb.toFixed(2) + ' MB) — large for on-chain; try a lower frame rate or fewer repeats.'
       : 'Built (' + mb.toFixed(2) + ' MB) — on-chain-friendly. Download + embed in Kid3.'

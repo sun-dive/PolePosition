@@ -400,8 +400,14 @@ const server = createServer(async (req, res) => {
       if (steps.length === 0) return sendJson(res, 400, { error: 'Add at least one clip.' })
       const outPath = await buildSequence(steps, stride); tmp.push(outPath)
       const buf = await readFile(outPath)
-      const frames = await runCmd('magick', ['identify', outPath], true).then(o => o.split('\n').filter(Boolean).length).catch(() => 0)
-      return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + buf.toString('base64'), size: buf.length, frames })
+      // Frame count + total loop duration (sum of per-frame delays, centiseconds → seconds).
+      let frames = 0, duration = 0
+      try {
+        const delays = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).map(n => parseInt(n, 10) || 0)
+        frames = delays.length
+        duration = delays.reduce((a, b) => a + b, 0) / 100
+      } catch { /* leave 0 */ }
+      return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + buf.toString('base64'), size: buf.length, frames, duration })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'sequence build failed' })
     } finally {
