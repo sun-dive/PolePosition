@@ -644,15 +644,22 @@ function webpAnimDurationMs (buf) {
   }
   return found ? total : null
 }
-// Live loop-length estimate from each clip's parsed duration × its repeat — independent of frame rate.
+// Live loop-length + size estimate. Duration = clip ms × repeat (frame-rate-independent); size ≈
+// Σ(clip bytes × repeat) / stride — empirically ~4% conservative vs the actual build, so a safe ceiling.
 function updateSeqEstimate () {
-  let ms = 0, known = true
+  const stride = $('seqFps').value === 'third' ? 3 : $('seqFps').value === 'half' ? 2 : 1
+  let ms = 0, bytes = 0, known = true
   for (const li of Array.from($('seqList').children)) {
-    if (!li.querySelector('.seq-file').files[0]) continue
-    const d = parseInt(li.dataset.durMs || '0', 10), r = parseInt(li.querySelector('.seq-rep').value, 10) || 1
+    const f = li.querySelector('.seq-file').files[0]; if (!f) continue
+    const r = parseInt(li.querySelector('.seq-rep').value, 10) || 1
+    const d = parseInt(li.dataset.durMs || '0', 10)
     if (d > 0) ms += d * r; else known = false
+    bytes += f.size * r
   }
-  $('seqEstimate').textContent = ms > 0 ? '≈ ' + (ms / 1000).toFixed(1) + 's loop' + (known ? '' : ' +') : ''
+  if (bytes <= 0) { $('seqEstimate').textContent = ''; return }
+  const mb = bytes / stride / 1048576
+  $('seqEstimate').textContent = '≈ ' + (ms / 1000).toFixed(1) + 's loop' + (known ? '' : ' +') +
+    ' · ~' + mb.toFixed(1) + ' MB' + (mb > 3 ? ' ⚠' : '')
 }
 function addSeqStep () {
   const li = document.createElement('li'); li.className = 'seq-step'
@@ -710,6 +717,7 @@ $('btnSeq').onclick = openSeq
 $('seqClose').onclick = () => { $('seqModal').hidden = true }
 $('seqModal').addEventListener('click', e => { if (e.target === $('seqModal')) $('seqModal').hidden = true })
 $('seqAdd').onclick = addSeqStep
+$('seqFps').onchange = updateSeqEstimate
 $('seqBuild').onclick = buildSequenceClips
 $('seqDownload').onclick = downloadSeq
 
