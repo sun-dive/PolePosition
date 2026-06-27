@@ -530,7 +530,7 @@ async function generateCover () {
   if (!prompt) { $('coverStatus').textContent = 'Describe the cover first.'; return }
   $('coverGen').disabled = true; $('coverStatus').textContent = 'Generating… (can take 20–40s)'
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: '2:3' }) })
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: $('coverAspect').value || '2:3' }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('coverStatus').textContent = data.error || ('Error ' + r.status); return }
     coverData = data.dataUrl
@@ -557,7 +557,7 @@ async function optimizeCoverPrompt () {
   if (!description) { $('coverOptStatus').textContent = 'Describe it first.'; return }
   $('coverOptimize').disabled = true; $('coverOptStatus').textContent = 'Claude is writing the prompt…'
   try {
-    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'cover' }) })
+    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'cover', aspect: $('coverAspect').value || '2:3' }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('coverOptStatus').textContent = data.error || ('Error ' + r.status); return }
     $('coverPrompt').value = (data.prompt || '').trim()

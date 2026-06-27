@@ -141,6 +141,10 @@
       <textarea id="coverPrompt" class="cover-prompt" rows="6"></textarea>
       <div class="row" style="margin-top:8px; align-items:center; gap:8px">
         <button id="coverGen" class="ai-btn" type="button">Generate</button>
+        <select id="coverAspect" title="Cover shape">
+          <option value="2:3">📖 Portrait 2:3 (book)</option>
+          <option value="1:1">🎵 Square 1:1 (music)</option>
+        </select>
         <button id="coverOpen" class="ghost" type="button">📂 Open image…</button>
         <input id="coverFile" type="file" accept="image/*" hidden />
         <span id="coverStatus" class="dim"></span>

@@ -137,7 +137,8 @@ function friendlyError (code) {
 
 // Turn a simple description into a rich image prompt via Claude (subscription) — the masterclass workflow.
 async function optimizeImagePrompt (description, kind, style, aspect) {
-  const what = kind === 'cover' ? 'a premium ebook FRONT-COVER image (portrait orientation)' : 'an in-book illustration'
+  const orient = aspect === '1:1' ? 'square' : aspect === '16:9' ? 'wide landscape' : 'portrait'
+  const what = kind === 'cover' ? `a premium FRONT-COVER image (${orient} orientation)` : 'an in-book illustration'
   const styleNote = style ? `\n\nThe image WILL be rendered in this fixed house style — describe the subject and composition to suit it, and do NOT introduce a different style: ${style}` : ''
   const frames = { '16:9': 'a WIDE LANDSCAPE', '3:4': 'a TALL PORTRAIT', '1:1': 'a SQUARE', '2:3': 'a TALL PORTRAIT' }
   const aspectNote = aspect && frames[aspect] ? `\n\nCompose for ${frames[aspect]} frame: the illustration MUST fill the entire frame edge to edge — spread the subject and supporting elements across the whole frame. Do NOT place a small centred motif on an empty background.` : ''
