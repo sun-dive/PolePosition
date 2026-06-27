@@ -721,8 +721,12 @@ $('seqFps').onchange = updateSeqEstimate
 $('seqBuild').onclick = buildSequenceClips
 $('seqDownload').onclick = downloadSeq
 
-/* ---- Music-video scene timeline → video.cue (synced scenes for the PharLap player) ---- */
-let tlAudioUrl = ''
+/* ---- Music-video scene timeline → bundle (scenes + song + video.cue) for the PharLap player ----
+   Two sections: ① a scene LIBRARY (each clip stored once) and ② a TIMELINE of placements (reuse clips freely).
+   This mirrors the on-chain cost model — a clip placed at 5 times is one file + 5 short cue lines. */
+let tlAudioUrl = '', tlAudioFile = null
+const tlLib = new Map() // filename -> { file, url, dur } : the distinct scene clips, each stored once
+
 // Seconds → LRC time "mm:ss.cc" (centiseconds), with carry so 59.999 → 01:00.00 not 00:60.00.
 function fmtLrc (sec) {
   if (!isFinite(sec) || sec < 0) sec = 0
@@ -735,73 +739,152 @@ function parseLrcTime (str) {
   const m = /^(\d{1,2}):(\d{1,2}(?:\.\d{1,2})?)$/.exec((str || '').trim())
   return m ? parseInt(m[1], 10) * 60 + parseFloat(m[2]) : null
 }
+
+/* --- ① Scene library --- */
+async function addLibFiles (files) {
+  for (const f of files) {
+    if (tlLib.has(f.name)) continue // already in the library — stored once
+    const entry = { file: f, url: URL.createObjectURL(f), dur: '' }
+    tlLib.set(f.name, entry)
+    try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) entry.dur = (ms / 1000).toFixed(1) + 's' } catch { /* not animated */ }
+  }
+  renderLib(); refreshSceneSelects()
+}
+function usageCount (name) { return Array.from($('tlList').children).filter(li => li.querySelector('.tl-scene').value === name).length }
+function renderLib () {
+  const ul = $('tlLib'); ul.textContent = ''
+  if (tlLib.size === 0) { const li = document.createElement('li'); li.className = 'dim'; li.style.fontSize = '12px'; li.textContent = 'No scene clips yet — add WebP/GIF clips below.'; ul.append(li); return }
+  for (const [name, e] of tlLib) {
+    const li = document.createElement('li'); li.className = 'tl-lib-row'
+    const img = document.createElement('img'); img.className = 'tl-lib-thumb'; img.src = e.url
+    const nm = document.createElement('span'); nm.className = 'tl-lib-name'; nm.textContent = name; nm.title = name
+    const du = document.createElement('span'); du.className = 'tl-lib-dur dim'; du.textContent = e.dur
+    const n = usageCount(name)
+    const use = document.createElement('span'); use.className = 'tl-lib-use dim'; use.textContent = n ? ('used ×' + n) : 'unused'
+    const del = document.createElement('button'); del.className = 'ghost tl-lib-del'; del.type = 'button'; del.textContent = '✕'; del.title = 'Remove clip + its timeline placements'
+    del.onclick = () => {
+      URL.revokeObjectURL(e.url); tlLib.delete(name)
+      Array.from($('tlList').children).forEach(li2 => { if (li2.querySelector('.tl-scene').value === name) li2.remove() })
+      renumberTl(); renderLib(); refreshSceneSelects(); updateTlPreview()
+    }
+    li.append(img, nm, du, use, del); ul.append(li)
+  }
+}
+
+/* --- ② Timeline placements --- */
+function sceneSelect (selected) {
+  const sel = document.createElement('select'); sel.className = 'tl-scene'
+  for (const name of tlLib.keys()) { const o = document.createElement('option'); o.value = name; o.textContent = name; if (name === selected) o.selected = true; sel.append(o) }
+  return sel
+}
+function refreshSceneSelects () { // rebuild each placement's dropdown to reflect the current library, keeping its pick
+  for (const li of Array.from($('tlList').children)) {
+    const old = li.querySelector('.tl-scene'); const fresh = sceneSelect(old.value); fresh.onchange = old.onchange
+    old.replaceWith(fresh)
+  }
+}
 function renumberTl () { Array.from($('tlList').children).forEach((li, i) => { li.querySelector('.tl-num').textContent = (i + 1) }) }
 function sortTl () {
   const list = $('tlList'), rows = Array.from(list.children)
   rows.sort((a, b) => (parseLrcTime(a.querySelector('.tl-time').value) ?? 1e9) - (parseLrcTime(b.querySelector('.tl-time').value) ?? 1e9))
   rows.forEach(r => list.append(r)); renumberTl()
 }
-function addTlScene () {
+function addTlRow () {
+  if (tlLib.size === 0) { $('tlStatus').textContent = 'Add a scene clip first (section ①).'; return }
   const li = document.createElement('li'); li.className = 'tl-step'
-  li.innerHTML = '<span class="tl-num"></span>' +
-    '<input type="file" accept="image/*" class="tl-file" />' +
-    '<span class="tl-dur dim"></span>' +
-    '<input type="text" class="tl-time" placeholder="00:00.00" value="00:00.00" />' +
-    '<button class="ghost tl-set" type="button" title="Set start from the song’s current position">⏱ Set</button>' +
-    '<button class="ghost tl-del" type="button" title="Remove">✕</button>'
-  const file = li.querySelector('.tl-file'), durEl = li.querySelector('.tl-dur'), time = li.querySelector('.tl-time')
-  file.onchange = async () => {
-    if (li.dataset.url) { URL.revokeObjectURL(li.dataset.url); li.dataset.url = '' }
-    durEl.textContent = ''
-    const f = file.files[0]; if (!f) return
-    li.dataset.url = URL.createObjectURL(f); li.dataset.fname = f.name
-    // Auto-time this scene to the song's current position, so scrub→pick naturally gives each scene a distinct
-    // start (otherwise every row sits at 00:00.00 and the preview just shows the last one). Won't clobber a time
-    // you've already set/captured.
-    const a = $('tlPlayer')
-    if (a.src && a.currentTime > 0 && time.value.trim() === '00:00.00') time.value = fmtLrc(a.currentTime)
-    sortTl(); updateTlPreview()
-    try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) durEl.textContent = (ms / 1000).toFixed(1) + 's' } catch {}
-  }
-  li.querySelector('.tl-set').onclick = () => {
-    const a = $('tlPlayer'); if (!a.src) { $('tlStatus').textContent = 'Load a song first, then scrub + Set.'; return }
-    time.value = fmtLrc(a.currentTime); sortTl(); updateTlPreview()
-  }
+  const num = document.createElement('span'); num.className = 'tl-num'
+  const sel = sceneSelect('') // defaults to the first library clip
+  const time = document.createElement('input'); time.type = 'text'; time.className = 'tl-time'; time.value = '00:00.00'; time.placeholder = '00:00.00'
+  const setB = document.createElement('button'); setB.className = 'ghost tl-set'; setB.type = 'button'; setB.textContent = '⏱ Set'; setB.title = 'Set start from the song’s current position'
+  const delB = document.createElement('button'); delB.className = 'ghost tl-del'; delB.type = 'button'; delB.textContent = '✕'; delB.title = 'Remove'
+  const a = $('tlPlayer'); if (a.src && a.currentTime > 0) time.value = fmtLrc(a.currentTime) // default to current position
+  sel.onchange = () => { renderLib(); updateTlPreview() }
+  setB.onclick = () => { if (!a.src) { $('tlStatus').textContent = 'Load a song first, then scrub + Set.'; return } time.value = fmtLrc(a.currentTime); sortTl(); updateTlPreview() }
   time.onchange = () => { sortTl(); updateTlPreview() }
-  li.querySelector('.tl-del').onclick = () => { if (li.dataset.url) URL.revokeObjectURL(li.dataset.url); li.remove(); renumberTl(); updateTlPreview() }
-  $('tlList').append(li); renumberTl()
+  delB.onclick = () => { li.remove(); renumberTl(); renderLib(); updateTlPreview() }
+  li.append(num, sel, time, setB, delB)
+  $('tlList').append(li); sortTl(); renderLib(); updateTlPreview()
 }
-function tlScenes () {
-  return Array.from($('tlList').children).map(li => ({ t: parseLrcTime(li.querySelector('.tl-time').value), name: li.dataset.fname, url: li.dataset.url }))
-    .filter(s => s.t != null && s.name && s.url).sort((a, b) => a.t - b.t)
+function tlPlacements () {
+  return Array.from($('tlList').children)
+    .map(li => ({ t: parseLrcTime(li.querySelector('.tl-time').value), name: li.querySelector('.tl-scene').value }))
+    .filter(s => s.t != null && s.name && tlLib.has(s.name))
+    .map(s => ({ t: s.t, name: s.name, url: tlLib.get(s.name).url }))
+    .sort((a, b) => a.t - b.t)
 }
 function updateTlPreview () {
-  const scenes = tlScenes(); if (scenes.length === 0) return
+  const scenes = tlPlacements(); if (scenes.length === 0) return
   const ct = $('tlPlayer').currentTime
   let cur = scenes[0]
   for (const s of scenes) { if (s.t <= ct) cur = s; else break }
   const img = $('tlPreview')
   if (img.getAttribute('src') !== cur.url) { img.src = cur.url; img.style.display = 'block'; $('tlPreviewHint').style.display = 'none' }
 }
-function downloadCue () {
-  const scenes = tlScenes()
-  if (scenes.length === 0) { $('tlStatus').textContent = 'Add at least one scene (file + time).'; return }
-  const text = scenes.map(s => '[' + fmtLrc(s.t) + ']' + s.name).join('\n') + '\n'
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }))
-  const a = document.createElement('a'); a.href = url; a.download = 'video.cue'; a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-  $('tlStatus').textContent = 'Saved video.cue (' + scenes.length + ' scenes) — mint it with the track + scene files.'
+function cueText () {
+  const scenes = tlPlacements()
+  return scenes.length ? scenes.map(s => '[' + fmtLrc(s.t) + ']' + s.name).join('\n') + '\n' : ''
 }
-function openTimeline () { if ($('tlList').children.length === 0) { addTlScene(); addTlScene() } $('tlModal').hidden = false }
+function triggerDownload (blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+function downloadCue () {
+  const text = cueText()
+  if (!text) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
+  triggerDownload(new Blob([text], { type: 'text/plain' }), 'video.cue')
+  $('tlStatus').textContent = 'Saved video.cue — mint it with the song + scene clips.'
+}
+async function downloadBundle () {
+  const text = cueText()
+  if (!text) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
+  $('tlStatus').textContent = 'Packing bundle…'
+  const entries = []
+  for (const [name, e] of tlLib) entries.push({ name, bytes: new Uint8Array(await e.file.arrayBuffer()) })
+  if (tlAudioFile) entries.push({ name: tlAudioFile.name, bytes: new Uint8Array(await tlAudioFile.arrayBuffer()) })
+  entries.push({ name: 'video.cue', bytes: new TextEncoder().encode(text) })
+  triggerDownload(makeZip(entries), 'music-video-bundle.zip')
+  $('tlStatus').textContent = 'Bundle ready (' + tlLib.size + ' clips' + (tlAudioFile ? ' + song' : '') + ' + cue). Unzip, then mint all together in PharLap.'
+}
+
+/* --- minimal store-only ZIP (WebP/audio are already compressed, so no deflate needed) --- */
+function crc32 (bytes) {
+  let c = 0xffffffff
+  for (let i = 0; i < bytes.length; i++) { c ^= bytes[i]; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)) }
+  return (~c) >>> 0
+}
+function makeZip (entries) {
+  const enc = new TextEncoder(), parts = [], central = []
+  let offset = 0
+  const p16 = (a, n) => a.push(n & 0xff, (n >>> 8) & 0xff)
+  const p32 = (a, n) => a.push(n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff)
+  for (const e of entries) {
+    const name = enc.encode(e.name), data = e.bytes, crc = crc32(data)
+    const lh = []; p32(lh, 0x04034b50); p16(lh, 20); p16(lh, 0); p16(lh, 0); p16(lh, 0); p16(lh, 0)
+    p32(lh, crc); p32(lh, data.length); p32(lh, data.length); p16(lh, name.length); p16(lh, 0)
+    const lhu = new Uint8Array(lh); parts.push(lhu, name, data)
+    const ch = []; p32(ch, 0x02014b50); p16(ch, 20); p16(ch, 20); p16(ch, 0); p16(ch, 0); p16(ch, 0); p16(ch, 0)
+    p32(ch, crc); p32(ch, data.length); p32(ch, data.length); p16(ch, name.length); p16(ch, 0); p16(ch, 0); p16(ch, 0); p16(ch, 0); p32(ch, 0); p32(ch, offset)
+    central.push(new Uint8Array(ch), name)
+    offset += lhu.length + name.length + data.length
+  }
+  let cSize = 0; for (const c of central) cSize += c.length
+  const eo = []; p32(eo, 0x06054b50); p16(eo, 0); p16(eo, 0); p16(eo, entries.length); p16(eo, entries.length); p32(eo, cSize); p32(eo, offset); p16(eo, 0)
+  return new Blob([...parts, ...central, new Uint8Array(eo)], { type: 'application/zip' })
+}
+
+function openTimeline () { renderLib(); $('tlModal').hidden = false }
 $('btnTimeline').onclick = openTimeline
 $('tlClose').onclick = () => { $('tlModal').hidden = true }
 $('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('tlModal').hidden = true })
-$('tlAdd').onclick = addTlScene
+$('tlAddFiles').onchange = () => { const fs = Array.from($('tlAddFiles').files || []); if (fs.length) addLibFiles(fs); $('tlAddFiles').value = '' }
+$('tlAdd').onclick = addTlRow
 $('tlDownload').onclick = downloadCue
+$('tlBundle').onclick = downloadBundle
 $('tlAudio').onchange = () => {
   const f = $('tlAudio').files[0]; if (!f) return
   if (tlAudioUrl) URL.revokeObjectURL(tlAudioUrl)
-  tlAudioUrl = URL.createObjectURL(f)
+  tlAudioFile = f; tlAudioUrl = URL.createObjectURL(f)
   const a = $('tlPlayer'); a.src = tlAudioUrl; a.style.display = 'block'; $('tlAudioName').textContent = f.name
 }
 $('tlPlayer').addEventListener('timeupdate', updateTlPreview)

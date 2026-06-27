@@ -200,17 +200,22 @@
   <div id="tlModal" class="modal" hidden>
     <div class="modal-box" style="max-width:560px">
       <div class="modal-head"><b>🎞️ Music video — scene timeline</b><button id="tlClose" class="ghost" type="button">✕</button></div>
-      <p class="dim" style="font-size:12px; margin:0 0 8px">Load your song, add scene clips (WebP), and set when each starts — scrub the song and tap <b>⏱ Set</b> to capture the moment. The preview plays the video as you build it. Download <code>video.cue</code>, then mint <b>[track + scenes + video.cue]</b> together in PharLap.</p>
+      <p class="dim" style="font-size:12px; margin:0 0 8px">Add scene clips once, then place them on the timeline — reuse a clip as many times as you like (it's stored once). Scrub the song and tap <b>⏱ Set</b> to time each placement. Download the <b>bundle</b> (scenes + song + <code>video.cue</code>), then mint it all together in PharLap.</p>
       <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px">
         <label class="ghost" style="cursor:pointer">🎵 Load song<input id="tlAudio" type="file" accept="audio/*" hidden></label>
         <span id="tlAudioName" class="dim" style="font-size:12px"></span>
       </div>
       <audio id="tlPlayer" controls style="width:100%; margin-bottom:10px; display:none"></audio>
       <div class="tl-preview"><img id="tlPreview" alt="scene preview" /><span id="tlPreviewHint" class="dim">Add scenes + press play to preview</span></div>
+      <div class="tl-sec">① Scene clips <span class="dim" style="font-weight:400">— each stored once on-chain</span></div>
+      <ul id="tlLib" class="tl-lib"></ul>
+      <label class="ghost" style="cursor:pointer; display:inline-block">+ Add scene clip(s)<input id="tlAddFiles" type="file" accept="image/*" multiple hidden></label>
+      <div class="tl-sec" style="margin-top:12px">② Timeline <span class="dim" style="font-weight:400">— place clips in time, reuse freely</span></div>
       <ol id="tlList" class="tl-list"></ol>
-      <button id="tlAdd" class="ghost" type="button">+ Add scene</button>
-      <div class="row" style="margin-top:10px; gap:10px; align-items:center; flex-wrap:wrap">
-        <button id="tlDownload" class="ai-btn" type="button">⬇ Download video.cue</button>
+      <button id="tlAdd" class="ghost" type="button">+ Add to timeline</button>
+      <div class="row" style="margin-top:12px; gap:8px; align-items:center; flex-wrap:wrap">
+        <button id="tlBundle" class="ai-btn" type="button">⬇ Download bundle (.zip)</button>
+        <button id="tlDownload" class="ghost" type="button">cue only</button>
         <span id="tlStatus" class="dim" style="font-size:12px"></span>
       </div>
     </div>
