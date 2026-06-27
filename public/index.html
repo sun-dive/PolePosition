@@ -20,6 +20,7 @@
       </span>
       <button id="btnCover" class="ghost" type="button" title="Generate a cover image with AI">🎨 Cover</button>
       <button id="btnSeq" class="ghost" type="button" title="Sequence animated clips into one looping cover">🎬 Sequence</button>
+      <button id="btnTimeline" class="ghost" type="button" title="Build a scene-timeline music video cue synced to a song">🎞️ Music video</button>
       <button id="btnArt" class="ghost" type="button" title="Generate chapter art and insert it">🖼️ Art</button>
       <button id="btnImport" class="ghost" type="button">Import</button>
       <button id="btnExport" class="ghost" type="button">Export draft</button>
@@ -192,6 +193,25 @@
       <div id="seqResult" hidden style="margin-top:10px">
         <img id="seqImg" alt="looping cover preview" style="max-width:100%; border-radius:6px" />
         <div class="cover-actions" style="margin-top:6px; align-items:center; gap:8px"><button id="seqDownload" class="ghost" type="button">Download</button><span id="seqInfo" class="dim"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tlModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:560px">
+      <div class="modal-head"><b>🎞️ Music video — scene timeline</b><button id="tlClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 8px">Load your song, add scene clips (WebP), and set when each starts — scrub the song and tap <b>⏱ Set</b> to capture the moment. The preview plays the video as you build it. Download <code>video.cue</code>, then mint <b>[track + scenes + video.cue]</b> together in PharLap.</p>
+      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px">
+        <label class="ghost" style="cursor:pointer">🎵 Load song<input id="tlAudio" type="file" accept="audio/*" hidden></label>
+        <span id="tlAudioName" class="dim" style="font-size:12px"></span>
+      </div>
+      <audio id="tlPlayer" controls style="width:100%; margin-bottom:10px; display:none"></audio>
+      <div class="tl-preview"><img id="tlPreview" alt="scene preview" /><span id="tlPreviewHint" class="dim">Add scenes + press play to preview</span></div>
+      <ol id="tlList" class="tl-list"></ol>
+      <button id="tlAdd" class="ghost" type="button">+ Add scene</button>
+      <div class="row" style="margin-top:10px; gap:10px; align-items:center; flex-wrap:wrap">
+        <button id="tlDownload" class="ai-btn" type="button">⬇ Download video.cue</button>
+        <span id="tlStatus" class="dim" style="font-size:12px"></span>
       </div>
     </div>
   </div>

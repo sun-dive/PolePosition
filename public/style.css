@@ -122,6 +122,17 @@ body.rich-mode .rich-editor {
 .seq-step .seq-rep { width: 52px; background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 4px 6px; }
 .seq-step .seq-del { line-height: 1; padding: 2px 8px; }
 #seqFps { background: var(--bg); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 5px 8px; font: inherit; }
+/* Music-video scene timeline */
+.tl-preview { position: relative; width: 100%; max-width: 260px; aspect-ratio: 1; margin: 0 auto 10px; background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.tl-preview img { width: 100%; height: 100%; object-fit: cover; display: none; }
+.tl-preview .dim { position: absolute; font-size: 12px; padding: 8px; text-align: center; }
+.tl-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tl-step { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.tl-step .tl-num { color: var(--accent); font-size: 12px; width: 16px; }
+.tl-step .tl-file { flex: 1; min-width: 0; font-size: 12px; }
+.tl-step .tl-dur { font-size: 11px; white-space: nowrap; min-width: 30px; text-align: right; }
+.tl-step .tl-time { width: 84px; background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 4px 6px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tl-step .tl-set, .tl-step .tl-del { line-height: 1; padding: 4px 8px; white-space: nowrap; }
 #btnCover.has-cover { border-color: var(--accent); color: var(--fg); }
 
 @media (max-width: 860px) {

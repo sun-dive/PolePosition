@@ -721,6 +721,92 @@ $('seqFps').onchange = updateSeqEstimate
 $('seqBuild').onclick = buildSequenceClips
 $('seqDownload').onclick = downloadSeq
 
+/* ---- Music-video scene timeline → video.cue (synced scenes for the PharLap player) ---- */
+let tlAudioUrl = ''
+// Seconds → LRC time "mm:ss.cc" (centiseconds), with carry so 59.999 → 01:00.00 not 00:60.00.
+function fmtLrc (sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0
+  let cs = Math.round(sec * 100)
+  const m = Math.floor(cs / 6000); cs -= m * 6000
+  const s = Math.floor(cs / 100); cs -= s * 100
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0')
+}
+function parseLrcTime (str) {
+  const m = /^(\d{1,2}):(\d{1,2}(?:\.\d{1,2})?)$/.exec((str || '').trim())
+  return m ? parseInt(m[1], 10) * 60 + parseFloat(m[2]) : null
+}
+function renumberTl () { Array.from($('tlList').children).forEach((li, i) => { li.querySelector('.tl-num').textContent = (i + 1) }) }
+function sortTl () {
+  const list = $('tlList'), rows = Array.from(list.children)
+  rows.sort((a, b) => (parseLrcTime(a.querySelector('.tl-time').value) ?? 1e9) - (parseLrcTime(b.querySelector('.tl-time').value) ?? 1e9))
+  rows.forEach(r => list.append(r)); renumberTl()
+}
+function addTlScene () {
+  const li = document.createElement('li'); li.className = 'tl-step'
+  li.innerHTML = '<span class="tl-num"></span>' +
+    '<input type="file" accept="image/*" class="tl-file" />' +
+    '<span class="tl-dur dim"></span>' +
+    '<input type="text" class="tl-time" placeholder="00:00.00" value="00:00.00" />' +
+    '<button class="ghost tl-set" type="button" title="Set start from the song’s current position">⏱ Set</button>' +
+    '<button class="ghost tl-del" type="button" title="Remove">✕</button>'
+  const file = li.querySelector('.tl-file'), durEl = li.querySelector('.tl-dur'), time = li.querySelector('.tl-time')
+  file.onchange = async () => {
+    if (li.dataset.url) { URL.revokeObjectURL(li.dataset.url); li.dataset.url = '' }
+    durEl.textContent = ''
+    const f = file.files[0]; if (!f) return
+    li.dataset.url = URL.createObjectURL(f); li.dataset.fname = f.name
+    // Auto-time this scene to the song's current position, so scrub→pick naturally gives each scene a distinct
+    // start (otherwise every row sits at 00:00.00 and the preview just shows the last one). Won't clobber a time
+    // you've already set/captured.
+    const a = $('tlPlayer')
+    if (a.src && a.currentTime > 0 && time.value.trim() === '00:00.00') time.value = fmtLrc(a.currentTime)
+    sortTl(); updateTlPreview()
+    try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) durEl.textContent = (ms / 1000).toFixed(1) + 's' } catch {}
+  }
+  li.querySelector('.tl-set').onclick = () => {
+    const a = $('tlPlayer'); if (!a.src) { $('tlStatus').textContent = 'Load a song first, then scrub + Set.'; return }
+    time.value = fmtLrc(a.currentTime); sortTl(); updateTlPreview()
+  }
+  time.onchange = () => { sortTl(); updateTlPreview() }
+  li.querySelector('.tl-del').onclick = () => { if (li.dataset.url) URL.revokeObjectURL(li.dataset.url); li.remove(); renumberTl(); updateTlPreview() }
+  $('tlList').append(li); renumberTl()
+}
+function tlScenes () {
+  return Array.from($('tlList').children).map(li => ({ t: parseLrcTime(li.querySelector('.tl-time').value), name: li.dataset.fname, url: li.dataset.url }))
+    .filter(s => s.t != null && s.name && s.url).sort((a, b) => a.t - b.t)
+}
+function updateTlPreview () {
+  const scenes = tlScenes(); if (scenes.length === 0) return
+  const ct = $('tlPlayer').currentTime
+  let cur = scenes[0]
+  for (const s of scenes) { if (s.t <= ct) cur = s; else break }
+  const img = $('tlPreview')
+  if (img.getAttribute('src') !== cur.url) { img.src = cur.url; img.style.display = 'block'; $('tlPreviewHint').style.display = 'none' }
+}
+function downloadCue () {
+  const scenes = tlScenes()
+  if (scenes.length === 0) { $('tlStatus').textContent = 'Add at least one scene (file + time).'; return }
+  const text = scenes.map(s => '[' + fmtLrc(s.t) + ']' + s.name).join('\n') + '\n'
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }))
+  const a = document.createElement('a'); a.href = url; a.download = 'video.cue'; a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  $('tlStatus').textContent = 'Saved video.cue (' + scenes.length + ' scenes) — mint it with the track + scene files.'
+}
+function openTimeline () { if ($('tlList').children.length === 0) { addTlScene(); addTlScene() } $('tlModal').hidden = false }
+$('btnTimeline').onclick = openTimeline
+$('tlClose').onclick = () => { $('tlModal').hidden = true }
+$('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('tlModal').hidden = true })
+$('tlAdd').onclick = addTlScene
+$('tlDownload').onclick = downloadCue
+$('tlAudio').onchange = () => {
+  const f = $('tlAudio').files[0]; if (!f) return
+  if (tlAudioUrl) URL.revokeObjectURL(tlAudioUrl)
+  tlAudioUrl = URL.createObjectURL(f)
+  const a = $('tlPlayer'); a.src = tlAudioUrl; a.style.display = 'block'; $('tlAudioName').textContent = f.name
+}
+$('tlPlayer').addEventListener('timeupdate', updateTlPreview)
+$('tlPlayer').addEventListener('seeked', updateTlPreview)
+
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
 const ART_TEMPLATES = [
