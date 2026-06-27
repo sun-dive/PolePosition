@@ -12,7 +12,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildEpub } from './epub.mjs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { unlink } from 'node:fs/promises'
+import { unlink, readdir, rm } from 'node:fs/promises'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = join(HERE, 'public')
@@ -247,11 +247,54 @@ async function mp4ToAnimatedImage (mp4Buffer) {
   } finally { await unlink(mp4).catch(() => {}) }
 }
 
+// Generic command runner (magick/identify). Captures stdout when `capture` is true; rejects with stderr tail.
+function runCmd (cmd, args, capture) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ['ignore', capture ? 'pipe' : 'ignore', 'pipe'] })
+    let out = '', err = ''
+    if (capture) p.stdout.on('data', d => { out += d })
+    p.stderr.on('data', d => { err += d })
+    p.on('error', e => reject(new Error(cmd + ' not found — install it (' + e.message + ')')))
+    p.on('close', code => code === 0 ? resolve(out) : reject(new Error(cmd + ' failed: ' + err.slice(-300))))
+  })
+}
+
+// Reduce an animated image to a fraction of its frame rate: keep every `stride`-th frame and multiply each
+// frame's delay so it plays at the same real-time speed (stride 1 = unchanged, 2 = half fps, 3 = third). Uses
+// ImageMagick (robust on animated WebP, unlike ffmpeg). Returns a new file path.
+async function reduceFps (inputPath, stride) {
+  if (stride <= 1) return inputPath
+  const dir = inputPath + '.frames'
+  await mkdir(dir, { recursive: true })
+  await runCmd('magick', [inputPath, '-coalesce', join(dir, 'f-%05d.png')])
+  let srcDelay = 7
+  try { const d = parseInt((await runCmd('magick', ['identify', '-format', '%T\n', inputPath], true)).trim().split(/\s+/)[0], 10); if (d > 0) srcDelay = d } catch { /* default 7cs */ }
+  const kept = (await readdir(dir)).filter(f => f.endsWith('.png')).sort().filter((_, i) => i % stride === 0).map(f => join(dir, f))
+  const out = inputPath + '.reduced.webp'
+  await runCmd('magick', ['-delay', String(srcDelay * stride), '-loop', '0', ...kept, out])
+  await rm(dir, { recursive: true, force: true })
+  return out
+}
+
+// Build a looping animated WebP from ordered steps [{ path, repeat }] at the chosen frame-rate stride.
+// Concatenate full-rate (each clip repeated in order), then reduce the whole sequence once. Returns the path.
+async function buildSequence (steps, stride) {
+  const base = join(tmpdir(), 'pp-seq-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  const args = []
+  for (const s of steps) for (let i = 0; i < s.repeat; i++) args.push(s.path)
+  const full = base + '-full.webp'
+  await runCmd('magick', [...args, '-loop', '0', full])
+  if (stride <= 1) return full
+  const reduced = await reduceFps(full, stride)
+  await unlink(full).catch(() => {})
+  return reduced
+}
+
 function sendJson (res, code, obj) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
 function readJson (req) {
   return new Promise((resolve, reject) => {
     let b = ''
-    req.on('data', c => { b += c; if (b.length > 12e6) { reject(new Error('body too large')); req.destroy() } })
+    req.on('data', c => { b += c; if (b.length > 80e6) { reject(new Error('body too large')); req.destroy() } })
     req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}) } catch (e) { reject(e) } })
     req.on('error', reject)
   })
@@ -335,6 +378,34 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, out)
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'animation failed' })
+    }
+  }
+
+  // ── Sequence clips → a looping animated WebP (add clip ×N, add clip ×N, …, at a chosen frame rate) ──
+  if (url.pathname === '/api/sequence' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    const stride = body.fps === 'third' ? 3 : body.fps === 'half' ? 2 : 1
+    const rawSteps = Array.isArray(body.steps) ? body.steps : []
+    const tmp = []
+    try {
+      const steps = []
+      for (const s of rawSteps) {
+        const m = typeof s?.image === 'string' && s.image.match(/^data:image\/[a-z0-9.+-]+;base64,(.+)$/i)
+        if (!m) continue
+        const p = join(tmpdir(), 'pp-clip-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.webp')
+        await writeFile(p, Buffer.from(m[1], 'base64')); tmp.push(p)
+        steps.push({ path: p, repeat: Math.min(50, Math.max(1, Math.floor(Number(s.repeat) || 1))) })
+      }
+      if (steps.length === 0) return sendJson(res, 400, { error: 'Add at least one clip.' })
+      const outPath = await buildSequence(steps, stride); tmp.push(outPath)
+      const buf = await readFile(outPath)
+      const frames = await runCmd('magick', ['identify', outPath], true).then(o => o.split('\n').filter(Boolean).length).catch(() => 0)
+      return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + buf.toString('base64'), size: buf.length, frames })
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message || 'sequence build failed' })
+    } finally {
+      for (const f of tmp) { await unlink(f).catch(() => {}); await unlink(f + '.reduced.webp').catch(() => {}); await rm(f + '.frames', { recursive: true, force: true }).catch(() => {}) }
     }
   }
 

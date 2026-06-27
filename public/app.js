@@ -626,6 +626,57 @@ $('coverFile').onchange = e => {
   rd.readAsDataURL(f); e.target.value = ''
 }
 
+/* ---- Sequence clips → a looping animated WebP cover (add clip ×N each, choose frame rate) ---- */
+function renumberSeq () { Array.from($('seqList').children).forEach((li, i) => { li.querySelector('.seq-num').textContent = (i + 1) }) }
+function addSeqStep () {
+  const li = document.createElement('li'); li.className = 'seq-step'
+  li.innerHTML = '<span class="seq-num"></span>' +
+    '<input type="file" accept="image/*" class="seq-file" />' +
+    '<label class="dim" style="font-size:12px; white-space:nowrap">repeat ×<input type="number" class="seq-rep" min="1" max="50" value="1" /></label>' +
+    '<button class="ghost seq-del" type="button" title="Remove">✕</button>'
+  li.querySelector('.seq-del').onclick = () => { li.remove(); renumberSeq() }
+  $('seqList').append(li); renumberSeq()
+}
+function readFileDataUrl (file) {
+  return new Promise(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => resolve(null); r.readAsDataURL(file) })
+}
+let seqResultData = ''
+async function buildSequenceClips () {
+  const steps = []
+  for (const li of Array.from($('seqList').children)) {
+    const f = li.querySelector('.seq-file').files[0]; if (!f) continue
+    const image = await readFileDataUrl(f); if (!image) continue
+    steps.push({ image, repeat: parseInt(li.querySelector('.seq-rep').value, 10) || 1 })
+  }
+  if (steps.length === 0) { $('seqStatus').textContent = 'Add at least one clip (pick a file).'; return }
+  $('seqBuild').disabled = true; $('seqStatus').textContent = 'Building… (assembling + rendering frames)'
+  try {
+    const r = await fetch('/api/sequence', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fps: $('seqFps').value, steps }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('seqStatus').textContent = data.error || ('Error ' + r.status); return }
+    seqResultData = data.dataUrl
+    $('seqImg').src = seqResultData; $('seqResult').hidden = false
+    const mb = data.size / 1048576
+    $('seqInfo').textContent = data.frames + ' frames · ' + mb.toFixed(2) + ' MB'
+    $('seqStatus').textContent = mb > 3
+      ? 'Built (' + mb.toFixed(2) + ' MB) — large for on-chain; try a lower frame rate or fewer repeats.'
+      : 'Built (' + mb.toFixed(2) + ' MB) — on-chain-friendly. Download + embed in Kid3.'
+  } catch (e) { $('seqStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('seqBuild').disabled = false }
+}
+function downloadSeq () {
+  if (!seqResultData) return
+  const a = document.createElement('a'); a.href = seqResultData
+  a.download = (book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-loop.webp'; a.click()
+}
+function openSeq () { if ($('seqList').children.length === 0) { addSeqStep(); addSeqStep() } $('seqModal').hidden = false }
+$('btnSeq').onclick = openSeq
+$('seqClose').onclick = () => { $('seqModal').hidden = true }
+$('seqModal').addEventListener('click', e => { if (e.target === $('seqModal')) $('seqModal').hidden = true })
+$('seqAdd').onclick = addSeqStep
+$('seqBuild').onclick = buildSequenceClips
+$('seqDownload').onclick = downloadSeq
+
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
 const ART_TEMPLATES = [
