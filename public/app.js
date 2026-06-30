@@ -1000,6 +1000,9 @@ function setLyCursor (i) {
   lyCursor = Math.max(0, Math.min(i, rows.length))
   rows.forEach((li, k) => li.classList.toggle('armed', k === lyCursor))
   $('lyHint').textContent = rows.length === 0 ? '' : lyCursor >= rows.length ? 'All lines timed ✓' : `Next: line ${lyCursor + 1} of ${rows.length}`
+  // Auto-scroll the armed line to the middle of the list so you never have to scroll while tapping along.
+  const armed = rows[lyCursor]
+  if (armed) { const list = $('lyList'); list.scrollTop = armed.offsetTop - (list.clientHeight - armed.clientHeight) / 2 }
 }
 function makeLyRow (text, time) {
   const li = document.createElement('li'); li.className = 'ly-row'
