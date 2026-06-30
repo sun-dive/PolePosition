@@ -1101,6 +1101,26 @@ function lyKeyGuard (e) {
 document.addEventListener('keydown', lyKeyGuard, true)
 document.addEventListener('keyup', lyKeyGuard, true)
 
+/* ---- WAV → FLAC (server-side flac --best --verify; raw binary upload, no base64 bloat) ---- */
+let flacFile = null
+$('btnFlac').onclick = () => { $('flacModal').hidden = false }
+$('flacClose').onclick = () => { $('flacModal').hidden = true }
+$('flacModal').addEventListener('click', e => { if (e.target === $('flacModal')) $('flacModal').hidden = true })
+$('flacInput').onchange = () => { flacFile = $('flacInput').files[0] || null; $('flacName').textContent = flacFile ? flacFile.name : ''; $('flacStatus').textContent = '' }
+$('flacEncode').onclick = async () => {
+  if (!flacFile) { $('flacStatus').textContent = 'Choose a WAV first.'; return }
+  $('flacEncode').disabled = true; $('flacStatus').textContent = 'Encoding… (lossless, max compression — large files take a moment)'
+  try {
+    const r = await fetch('/api/flac', { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: flacFile })
+    if (!r.ok) { const d = await r.json().catch(() => ({})); $('flacStatus').textContent = d.error || ('Error ' + r.status); return }
+    const blob = await r.blob()
+    triggerDownload(blob, flacFile.name.replace(/\.wav$/i, '') + '.flac')
+    const orig = +r.headers.get('x-orig-size') || flacFile.size, size = +r.headers.get('x-flac-size') || blob.size
+    $('flacStatus').textContent = `Done — ${(size / 1048576).toFixed(1)} MB FLAC (${Math.round(100 * size / orig)}% of the WAV). Downloaded.`
+  } catch (e) { $('flacStatus').textContent = 'Failed — is the server running? ' + e.message }
+  finally { $('flacEncode').disabled = false }
+}
+
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
 const ART_TEMPLATES = [

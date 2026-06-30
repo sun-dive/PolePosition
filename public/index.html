@@ -22,6 +22,7 @@
       <button id="btnSeq" class="ghost" type="button" title="Sequence animated clips into one looping cover">🎬 Sequence</button>
       <button id="btnTimeline" class="ghost" type="button" title="Build a scene-timeline music video cue synced to a song">🎞️ Music video</button>
       <button id="btnLyrics" class="ghost" type="button" title="Build a synced lyric (.lrc) timeline by tapping along to the song">🎤 Lyrics</button>
+      <button id="btnFlac" class="ghost" type="button" title="Encode a WAV to lossless FLAC (max compression) for minting">🎚️ WAV→FLAC</button>
       <button id="btnArt" class="ghost" type="button" title="Generate chapter art and insert it">🖼️ Art</button>
       <button id="btnImport" class="ghost" type="button">Import</button>
       <button id="btnExport" class="ghost" type="button">Export draft</button>
@@ -245,6 +246,21 @@
         <button id="lyDownload" class="ai-btn" type="button">⬇ Download .lrc</button>
         <button id="lyDownloadPlain" class="ghost" type="button" title="Plain lyrics, no timestamps (scrolls, not karaoke)">plain text</button>
         <span id="lyStatus" class="dim" style="font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="flacModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:460px">
+      <div class="modal-head"><b>🎚️ WAV → FLAC</b><button id="flacClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 10px">Lossless, maximum compression (<code>flac --best --verify</code>) — identical audio, ~half the size. Then embed the cover / Media / lyrics in Kid3 and mint the FLAC in PharLap.</p>
+      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px">
+        <label class="ghost" style="cursor:pointer">🎵 Choose WAV<input id="flacInput" type="file" accept=".wav,audio/wav,audio/x-wav" hidden></label>
+        <span id="flacName" class="dim" style="font-size:12px"></span>
+      </div>
+      <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
+        <button id="flacEncode" class="ai-btn" type="button">Encode to FLAC</button>
+        <span id="flacStatus" class="dim" style="font-size:12px"></span>
       </div>
     </div>
   </div>

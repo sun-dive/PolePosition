@@ -299,6 +299,15 @@ function readJson (req) {
     req.on('error', reject)
   })
 }
+// Read a raw binary request body (for audio uploads — base64 JSON would bloat a big WAV by a third).
+function readRawBody (req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let len = 0
+    req.on('data', c => { len += c.length; if (len > maxBytes) { reject(new Error('body too large')); req.destroy() } else chunks.push(c) })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`)
@@ -412,6 +421,26 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 502, { error: e.message || 'sequence build failed' })
     } finally {
       for (const f of tmp) { await unlink(f).catch(() => {}); await unlink(f + '.reduced.webp').catch(() => {}); await rm(f + '.frames', { recursive: true, force: true }).catch(() => {}) }
+    }
+  }
+
+  // ── WAV → FLAC (lossless, max compression) via the reference flac encoder ──
+  if (url.pathname === '/api/flac' && req.method === 'POST') {
+    const base = join(tmpdir(), 'pp-flac-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+    const inPath = base + '.wav', outPath = base + '.flac'
+    try {
+      const buf = await readRawBody(req, 600 * 1024 * 1024) // up to 600 MB WAV
+      if (buf.length === 0) return sendJson(res, 400, { error: 'no audio uploaded' })
+      await writeFile(inPath, buf)
+      // --best = max (lossless) compression; --verify re-decodes to confirm bit-exact; -s silent; -f overwrite.
+      await runCmd('flac', ['--best', '--verify', '-s', '-f', '-o', outPath, inPath])
+      const flac = await readFile(outPath)
+      res.writeHead(200, { 'content-type': 'audio/flac', 'content-disposition': 'attachment; filename="audio.flac"', 'x-orig-size': String(buf.length), 'x-flac-size': String(flac.length) })
+      return res.end(flac)
+    } catch (e) {
+      return sendJson(res, 502, { error: 'FLAC encode failed: ' + (e.message || 'error') + ' (is the file a valid WAV?)' })
+    } finally {
+      await unlink(inPath).catch(() => {}); await unlink(outPath).catch(() => {})
     }
   }
 
