@@ -1081,11 +1081,13 @@ $('lyPlayer').addEventListener('timeupdate', () => {
   rows.forEach((li, i) => { const t = parseLrcTime(li.querySelector('.ly-time').value); if (t != null && t <= ct) active = i })
   rows.forEach((li, i) => li.classList.toggle('playing', i === active))
 })
-// Space bar stamps the next line — only when the lyrics modal is open and you're not focused on a control.
+// Space bar stamps the next line. Skip only typing/selecting controls + the stamp button (which activates
+// itself on Space). Crucially we DON'T skip the audio element: when it's focused, Space would otherwise
+// pause the song — we preventDefault that and stamp instead, so you tap along while it keeps playing.
 document.addEventListener('keydown', e => {
   if ($('lyModal').hidden || e.code !== 'Space') return
   const tag = (e.target && e.target.tagName) || ''
-  if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'AUDIO'].includes(tag)) return
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target === $('lyStamp')) return
   e.preventDefault(); lyStampNext()
 })
 
