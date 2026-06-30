@@ -984,6 +984,111 @@ $('tlAudio').onchange = () => setSong($('tlAudio').files[0])
 $('tlPlayer').addEventListener('timeupdate', updateTlPreview)
 $('tlPlayer').addEventListener('seeked', updateTlPreview)
 
+/* ---- Lyrics timeline → .lrc (tap along to the song to time each line) ---- */
+let lyAudioUrl = '', lyCursor = 0
+function setLySong (f) {
+  if (!f) return
+  if (lyAudioUrl) URL.revokeObjectURL(lyAudioUrl)
+  lyAudioUrl = URL.createObjectURL(f)
+  const a = $('lyPlayer'); a.src = lyAudioUrl; a.style.display = 'block'; $('lyAudioName').textContent = f.name
+}
+function lyRows () { return Array.from($('lyList').children) }
+function renumberLy () { lyRows().forEach((li, i) => { li.querySelector('.ly-num').textContent = (i + 1) }) }
+// The "armed" line is the one the next ⏱/Space will stamp; clicking a line's number re-arms from there.
+function setLyCursor (i) {
+  const rows = lyRows()
+  lyCursor = Math.max(0, Math.min(i, rows.length))
+  rows.forEach((li, k) => li.classList.toggle('armed', k === lyCursor))
+  $('lyHint').textContent = rows.length === 0 ? '' : lyCursor >= rows.length ? 'All lines timed ✓' : `Next: line ${lyCursor + 1} of ${rows.length}`
+}
+function makeLyRow (text, time) {
+  const li = document.createElement('li'); li.className = 'ly-row'
+  const num = document.createElement('span'); num.className = 'ly-num'; num.title = 'Re-arm from this line'
+  const t = document.createElement('input'); t.type = 'text'; t.className = 'ly-time'; t.value = time || ''; t.placeholder = '—'
+  const txt = document.createElement('input'); txt.type = 'text'; txt.className = 'ly-text'; txt.value = text || ''
+  const setB = document.createElement('button'); setB.className = 'ghost ly-set'; setB.type = 'button'; setB.textContent = '⏱'; setB.title = 'Stamp this line at the current playback time'
+  const delB = document.createElement('button'); delB.className = 'ghost ly-del'; delB.type = 'button'; delB.textContent = '✕'; delB.title = 'Remove'
+  setB.onclick = () => { const a = $('lyPlayer'); if (!a.src) { $('lyStatus').textContent = 'Load a song first.'; return } t.value = fmtLrc(a.currentTime); setLyCursor(lyRows().indexOf(li) + 1) }
+  delB.onclick = () => { li.remove(); renumberLy(); setLyCursor(Math.min(lyCursor, lyRows().length)) }
+  num.onclick = () => setLyCursor(lyRows().indexOf(li))
+  li.append(num, t, txt, setB, delB)
+  return li
+}
+function buildLyRows () {
+  const lines = $('lyInput').value.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean)
+  if (lines.length === 0) { $('lyStatus').textContent = 'Paste some lyrics first.'; return }
+  // Keep existing times for unchanged lines, so re-loading after a small edit doesn't wipe your timing.
+  const existing = new Map(lyRows().map(li => [li.querySelector('.ly-text').value, li.querySelector('.ly-time').value]))
+  $('lyList').innerHTML = ''
+  for (const line of lines) $('lyList').append(makeLyRow(line, existing.get(line) || ''))
+  renumberLy(); setLyCursor(0)
+  $('lyStatus').textContent = `${lines.length} line${lines.length === 1 ? '' : 's'} loaded — play, then tap ⏱ (or Space) at the start of each.`
+}
+function lyStampNext () {
+  const rows = lyRows(); if (rows.length === 0) { $('lyStatus').textContent = 'Load your lyric lines first.'; return }
+  const a = $('lyPlayer'); if (!a.src) { $('lyStatus').textContent = 'Load a song first.'; return }
+  if (lyCursor >= rows.length) return
+  rows[lyCursor].querySelector('.ly-time').value = fmtLrc(a.currentTime)
+  setLyCursor(lyCursor + 1)
+}
+// Rows in entered order — lyrics stay in sequence, NEVER sorted (unlike scene placements).
+function lyData () { return lyRows().map(li => ({ time: parseLrcTime(li.querySelector('.ly-time').value), text: li.querySelector('.ly-text').value.trim() })).filter(r => r.text) }
+function downloadLrc () {
+  const rows = lyData()
+  if (rows.length === 0) { $('lyStatus').textContent = 'Nothing to export — load some lines.'; return }
+  const timed = rows.filter(r => r.time != null)
+  if (timed.length === 0) { $('lyStatus').textContent = 'No lines are timed yet — tap ⏱/Space along to the song, or use “plain text”.'; return }
+  const text = rows.map(r => (r.time != null ? '[' + fmtLrc(r.time) + ']' : '') + r.text).join('\n') + '\n'
+  triggerDownload(new Blob([text], { type: 'text/plain' }), 'lyrics.lrc')
+  $('lyStatus').textContent = `Saved lyrics.lrc (${timed.length}/${rows.length} lines timed). Add it in Kid3 (USLT / LYRICS).`
+}
+function downloadLrcPlain () {
+  const rows = lyData()
+  if (rows.length === 0) { $('lyStatus').textContent = 'Nothing to export — load some lines.'; return }
+  triggerDownload(new Blob([rows.map(r => r.text).join('\n') + '\n'], { type: 'text/plain' }), 'lyrics.lrc')
+  $('lyStatus').textContent = `Saved plain lyrics.lrc (${rows.length} lines, no timing — scrolls in the player).`
+}
+async function loadLrcFile (file) {
+  if (!file) return
+  const rows = []
+  for (const raw of (await file.text()).replace(/\r/g, '').split('\n')) {
+    const line = raw.trim()
+    if (!line || /^\[[a-z]+:/i.test(line)) continue // blank or LRC metadata tag (ti/ar/al/offset…)
+    const m = /^\[(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)\]\s*(.*)$/.exec(line)
+    if (m) rows.push({ time: fmtLrc(parseInt(m[1], 10) * 60 + parseFloat(m[2])), txt: m[3].replace(/^(?:\[[^\]]*\]\s*)+/, '').trim() })
+    else rows.push({ time: '', txt: line })
+  }
+  if (rows.length === 0) { $('lyStatus').textContent = 'No lyric lines found in that file.'; return }
+  $('lyInput').value = rows.map(r => r.txt).join('\n')
+  $('lyList').innerHTML = ''
+  for (const r of rows) $('lyList').append(makeLyRow(r.txt, r.time))
+  renumberLy(); setLyCursor(0)
+  $('lyStatus').textContent = `Loaded ${rows.length} line${rows.length === 1 ? '' : 's'} from .lrc — edit or re-time as needed.`
+}
+function openLyrics () { $('lyModal').hidden = false }
+$('btnLyrics').onclick = openLyrics
+$('lyClose').onclick = () => { $('lyModal').hidden = true }
+$('lyModal').addEventListener('click', e => { if (e.target === $('lyModal')) $('lyModal').hidden = true })
+$('lyAudio').onchange = () => setLySong($('lyAudio').files[0])
+$('lyLoadLrc').onchange = () => { const f = $('lyLoadLrc').files[0]; if (f) loadLrcFile(f); $('lyLoadLrc').value = '' }
+$('lyBuild').onclick = buildLyRows
+$('lyStamp').onclick = lyStampNext
+$('lyDownload').onclick = downloadLrc
+$('lyDownloadPlain').onclick = downloadLrcPlain
+// Live: highlight the line currently sounding (by its stamped time) so you can verify the sync as you play.
+$('lyPlayer').addEventListener('timeupdate', () => {
+  const ct = $('lyPlayer').currentTime; const rows = lyRows(); let active = -1
+  rows.forEach((li, i) => { const t = parseLrcTime(li.querySelector('.ly-time').value); if (t != null && t <= ct) active = i })
+  rows.forEach((li, i) => li.classList.toggle('playing', i === active))
+})
+// Space bar stamps the next line — only when the lyrics modal is open and you're not focused on a control.
+document.addEventListener('keydown', e => {
+  if ($('lyModal').hidden || e.code !== 'Space') return
+  const tag = (e.target && e.target.tagName) || ''
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'AUDIO'].includes(tag)) return
+  e.preventDefault(); lyStampNext()
+})
+
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
 const ART_TEMPLATES = [

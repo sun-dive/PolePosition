@@ -134,6 +134,15 @@ body.rich-mode .rich-editor {
 .tl-step .tl-time { width: 84px; background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 4px 6px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .tl-step .tl-set, .tl-step .tl-del { line-height: 1; padding: 4px 8px; white-space: nowrap; }
 .tl-step .tl-move { line-height: 1; padding: 4px 7px; font-size: 13px; }
+/* Lyrics timeline */
+.ly-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow: auto; }
+.ly-row { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-left: 3px solid transparent; border-radius: 8px; padding: 4px 8px; }
+.ly-row.armed { border-left-color: var(--accent); }
+.ly-row.playing { background: rgba(88, 166, 255, .10); }
+.ly-row .ly-num { color: var(--accent); font-size: 12px; width: 18px; flex: none; cursor: pointer; text-align: right; }
+.ly-row .ly-time { width: 78px; flex: none; background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 4px 6px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+.ly-row .ly-text { flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 4px 8px; font: 13px inherit; }
+.ly-row .ly-set, .ly-row .ly-del { line-height: 1; padding: 4px 8px; flex: none; }
 .tl-step .tl-scene { flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 5px 6px; font: 13px inherit; }
 .tl-sec { font-size: 12px; font-weight: 600; color: var(--fg); margin: 0 0 6px; }
 .tl-lib { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }

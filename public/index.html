@@ -21,6 +21,7 @@
       <button id="btnCover" class="ghost" type="button" title="Generate a cover image with AI">🎨 Cover</button>
       <button id="btnSeq" class="ghost" type="button" title="Sequence animated clips into one looping cover">🎬 Sequence</button>
       <button id="btnTimeline" class="ghost" type="button" title="Build a scene-timeline music video cue synced to a song">🎞️ Music video</button>
+      <button id="btnLyrics" class="ghost" type="button" title="Build a synced lyric (.lrc) timeline by tapping along to the song">🎤 Lyrics</button>
       <button id="btnArt" class="ghost" type="button" title="Generate chapter art and insert it">🖼️ Art</button>
       <button id="btnImport" class="ghost" type="button">Import</button>
       <button id="btnExport" class="ghost" type="button">Export draft</button>
@@ -219,6 +220,31 @@
         <button id="tlBundle" class="ai-btn" type="button">⬇ Download bundle (.zip)</button>
         <button id="tlDownload" class="ghost" type="button">cue only</button>
         <span id="tlStatus" class="dim" style="font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="lyModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:560px">
+      <div class="modal-head"><b>🎤 Lyrics timeline → .lrc</b><button id="lyClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 8px">Load the song, paste the lyrics, then <b>play and tap ⏱ (or the Space bar)</b> at the start of each line to time it. Download the <code>.lrc</code> and add it in Kid3 (USLT / LYRICS) for synced lyrics in the player.</p>
+      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px">
+        <label class="ghost" style="cursor:pointer">🎵 Load song<input id="lyAudio" type="file" accept="audio/*" hidden></label>
+        <label class="ghost" style="cursor:pointer" title="Load an existing .lrc to edit/re-time">⬆ Load .lrc<input id="lyLoadLrc" type="file" accept=".lrc,.txt,text/plain" hidden></label>
+        <span id="lyAudioName" class="dim" style="font-size:12px"></span>
+      </div>
+      <audio id="lyPlayer" controls style="width:100%; margin-bottom:10px; display:none"></audio>
+      <textarea id="lyInput" placeholder="Paste the lyrics here — one line per row…" style="width:100%; min-height:80px; resize:vertical"></textarea>
+      <button id="lyBuild" class="ghost" type="button" style="margin-top:6px">↻ Load lines</button>
+      <ol id="lyList" class="ly-list"></ol>
+      <div class="row" style="margin-top:8px; gap:10px; align-items:center; flex-wrap:wrap">
+        <button id="lyStamp" class="ai-btn" type="button">⏱ Stamp line (Space)</button>
+        <span id="lyHint" class="dim" style="font-size:12px"></span>
+      </div>
+      <div class="row" style="margin-top:10px; gap:8px; align-items:center; flex-wrap:wrap">
+        <button id="lyDownload" class="ai-btn" type="button">⬇ Download .lrc</button>
+        <button id="lyDownloadPlain" class="ghost" type="button" title="Plain lyrics, no timestamps (scrolls, not karaoke)">plain text</button>
+        <span id="lyStatus" class="dim" style="font-size:12px"></span>
       </div>
     </div>
   </div>
