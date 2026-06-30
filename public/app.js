@@ -1025,9 +1025,13 @@ function buildLyRows () {
   $('lyStatus').textContent = `${lines.length} line${lines.length === 1 ? '' : 's'} loaded — play, then tap ⏱ (or Space) at the start of each.`
 }
 function lyStampNext () {
-  const rows = lyRows(); if (rows.length === 0) { $('lyStatus').textContent = 'Load your lyric lines first.'; return }
+  let rows = lyRows()
+  if (rows.length === 0) { // be forgiving: if lines are pasted but not yet "Loaded", build them now
+    if ($('lyInput').value.trim()) { buildLyRows(); rows = lyRows() }
+    if (rows.length === 0) { $('lyStatus').textContent = 'Paste your lyrics above, then tap to time them.'; return }
+  }
   const a = $('lyPlayer'); if (!a.src) { $('lyStatus').textContent = 'Load a song first.'; return }
-  if (lyCursor >= rows.length) return
+  if (lyCursor >= rows.length) { $('lyStatus').textContent = 'All lines timed ✓ — download the .lrc.'; return }
   rows[lyCursor].querySelector('.ly-time').value = fmtLrc(a.currentTime)
   setLyCursor(lyCursor + 1)
 }
@@ -1081,15 +1085,18 @@ $('lyPlayer').addEventListener('timeupdate', () => {
   rows.forEach((li, i) => { const t = parseLrcTime(li.querySelector('.ly-time').value); if (t != null && t <= ct) active = i })
   rows.forEach((li, i) => li.classList.toggle('playing', i === active))
 })
-// Space bar stamps the next line. Skip only typing/selecting controls + the stamp button (which activates
-// itself on Space). Crucially we DON'T skip the audio element: when it's focused, Space would otherwise
-// pause the song — we preventDefault that and stamp instead, so you tap along while it keeps playing.
-document.addEventListener('keydown', e => {
+// Space bar stamps the next line. Run in the CAPTURE phase and stop the event before it reaches the audio
+// element (or any button), so its native play/pause can never fire — on BOTH keydown and keyup (browsers
+// toggle media on either). Typing in a text field is left alone. Only keydown actually stamps.
+function lyKeyGuard (e) {
   if ($('lyModal').hidden || e.code !== 'Space') return
   const tag = (e.target && e.target.tagName) || ''
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target === $('lyStamp')) return
-  e.preventDefault(); lyStampNext()
-})
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return // typing — leave Space alone
+  e.preventDefault(); e.stopImmediatePropagation()
+  if (e.type === 'keydown') lyStampNext()
+}
+document.addEventListener('keydown', lyKeyGuard, true)
+document.addEventListener('keyup', lyKeyGuard, true)
 
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
