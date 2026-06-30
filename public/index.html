@@ -203,6 +203,8 @@
       <p class="dim" style="font-size:12px; margin:0 0 8px">Add scene clips once, then place them on the timeline — reuse a clip as many times as you like (it's stored once). Scrub the song and tap <b>⏱ Set</b> to time each placement. Download the <b>bundle</b> (scenes + song + <code>video.cue</code>), then mint it all together in PharLap.</p>
       <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px">
         <label class="ghost" style="cursor:pointer">🎵 Load song<input id="tlAudio" type="file" accept="audio/*" hidden></label>
+        <label class="ghost" style="cursor:pointer" title="Re-open a saved project: scenes + song + timeline">⬆ Restore bundle<input id="tlLoadBundle" type="file" accept=".zip,application/zip" hidden></label>
+        <label class="ghost" style="cursor:pointer" title="Rebuild the timeline from a video.cue (add your scene clips first)">⬆ Load cue<input id="tlLoadCue" type="file" accept=".cue,.lrc,.txt,text/plain" hidden></label>
         <span id="tlAudioName" class="dim" style="font-size:12px"></span>
       </div>
       <audio id="tlPlayer" controls style="width:100%; margin-bottom:10px; display:none"></audio>

@@ -800,17 +800,19 @@ function moveTlRow (li, dir) {
   const tmp = a.value; a.value = b.value; b.value = tmp
   sortTl(); updateTlPreview()
 }
-function addTlRow () {
+function addTlRow (presetName, presetTime) { // presets supplied when restoring from a cue/bundle
   if (tlLib.size === 0) { $('tlStatus').textContent = 'Add a scene clip first (section ①).'; return }
   const li = document.createElement('li'); li.className = 'tl-step'
   const num = document.createElement('span'); num.className = 'tl-num'
-  const sel = sceneSelect('') // defaults to the first library clip
+  const sel = sceneSelect(presetName || '') // defaults to the first library clip (or the preset, when restoring)
   const time = document.createElement('input'); time.type = 'text'; time.className = 'tl-time'; time.value = '00:00.00'; time.placeholder = '00:00.00'
   const setB = document.createElement('button'); setB.className = 'ghost tl-set'; setB.type = 'button'; setB.textContent = '⏱ Set'; setB.title = 'Set start from the song’s current position'
   const upB = document.createElement('button'); upB.className = 'ghost tl-move'; upB.type = 'button'; upB.textContent = '↑'; upB.title = 'Move this clip earlier (swap slot with the one above)'
   const dnB = document.createElement('button'); dnB.className = 'ghost tl-move'; dnB.type = 'button'; dnB.textContent = '↓'; dnB.title = 'Move this clip later (swap slot with the one below)'
   const delB = document.createElement('button'); delB.className = 'ghost tl-del'; delB.type = 'button'; delB.textContent = '✕'; delB.title = 'Remove'
-  const a = $('tlPlayer'); if (a.src && a.currentTime > 0) time.value = fmtLrc(a.currentTime) // default to current position
+  const a = $('tlPlayer')
+  if (presetTime != null) time.value = presetTime
+  else if (a.src && a.currentTime > 0) time.value = fmtLrc(a.currentTime) // default to current playback position
   sel.onchange = () => { renderLib(); updateTlPreview() }
   setB.onclick = () => { if (!a.src) { $('tlStatus').textContent = 'Load a song first, then scrub + Set.'; return } time.value = fmtLrc(a.currentTime); sortTl(); updateTlPreview() }
   upB.onclick = () => moveTlRow(li, -1)
@@ -888,20 +890,97 @@ function makeZip (entries) {
   return new Blob([...parts, ...central, new Uint8Array(eo)], { type: 'application/zip' })
 }
 
+/* --- Restore a saved project: ⬆ Load bundle (.zip) re-opens everything; ⬆ Load cue (.cue) rebuilds the
+   timeline against clips already in the library. The bundle is the complete save file. --- */
+// Read a store-only ZIP (the format makeZip writes) by walking its local file headers — no inflate needed.
+function unzip (bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const dec = new TextDecoder()
+  const out = []
+  let off = 0
+  while (off + 30 <= dv.byteLength && dv.getUint32(off, true) === 0x04034b50) {
+    const compression = dv.getUint16(off + 8, true)
+    const size = dv.getUint32(off + 18, true) // store: compressed size == uncompressed size
+    const nameLen = dv.getUint16(off + 26, true), extraLen = dv.getUint16(off + 28, true)
+    const nameStart = off + 30
+    const name = dec.decode(bytes.subarray(nameStart, nameStart + nameLen))
+    const dataStart = nameStart + nameLen + extraLen
+    if (compression === 0) out.push({ name, bytes: bytes.subarray(dataStart, dataStart + size) })
+    off = dataStart + size
+  }
+  return out
+}
+function mimeFromName (n) {
+  const e = (n.split('.').pop() || '').toLowerCase()
+  const map = { webp: 'image/webp', gif: 'image/gif', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', apng: 'image/apng',
+    mp3: 'audio/mpeg', flac: 'audio/flac', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/opus', aif: 'audio/aiff', aiff: 'audio/aiff', weba: 'audio/webm' }
+  return map[e] || 'application/octet-stream'
+}
+function setSong (f) {
+  if (!f) return
+  if (tlAudioUrl) URL.revokeObjectURL(tlAudioUrl)
+  tlAudioFile = f; tlAudioUrl = URL.createObjectURL(f)
+  const a = $('tlPlayer'); a.src = tlAudioUrl; a.style.display = 'block'; $('tlAudioName').textContent = f.name
+}
+function clearTimeline () { $('tlList').innerHTML = ''; renumberTl() }
+function clearLibrary () { for (const e of tlLib.values()) URL.revokeObjectURL(e.url); tlLib.clear() }
+// Rebuild timeline placements from cue text (lines [mm:ss.cc]scene.webp). Clips must already be in the library.
+function importCueText (text) {
+  const re = /^\s*\[(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)\]\s*(\S.*?)\s*$/
+  let added = 0, missing = 0
+  for (const line of text.replace(/\r/g, '').split('\n')) {
+    const m = re.exec(line); if (!m) continue
+    const name = m[3]
+    if (!tlLib.has(name)) { missing++; continue }
+    addTlRow(name, fmtLrc(parseInt(m[1], 10) * 60 + parseFloat(m[2])))
+    added++
+  }
+  sortTl(); renderLib(); updateTlPreview()
+  return { added, missing }
+}
+async function loadCueFile (file) {
+  if (!file) return
+  if (tlLib.size === 0) { $('tlStatus').textContent = 'Add your scene clips first (section ①), then load the cue.'; return }
+  clearTimeline()
+  const { added, missing } = importCueText(await file.text())
+  $('tlStatus').textContent = `Loaded cue — ${added} placement${added === 1 ? '' : 's'} restored` + (missing ? `, ${missing} skipped (clip not in the library)` : '') + '.'
+}
+async function loadBundleFile (file) {
+  if (!file) return
+  $('tlStatus').textContent = 'Restoring bundle…'
+  let entries
+  try { entries = unzip(new Uint8Array(await file.arrayBuffer())) } catch { entries = [] }
+  if (entries.length === 0) { $('tlStatus').textContent = 'Could not read that bundle (.zip).'; return }
+  // Full restore → replace the current session.
+  clearTimeline(); clearLibrary()
+  if (tlAudioUrl) { URL.revokeObjectURL(tlAudioUrl); tlAudioUrl = ''; tlAudioFile = null }
+  $('tlPlayer').removeAttribute('src'); $('tlPlayer').style.display = 'none'; $('tlAudioName').textContent = ''
+  const sceneFiles = [], audioFiles = []
+  let cue = null
+  for (const e of entries) {
+    if (/\.(cue|lrc)$/i.test(e.name)) cue = new TextDecoder().decode(e.bytes)
+    else if (/\.(webp|gif|png|jpe?g|apng)$/i.test(e.name)) sceneFiles.push(new File([e.bytes], e.name, { type: mimeFromName(e.name) }))
+    else if (/\.(mp3|flac|wav|m4a|aac|ogg|oga|opus|aiff?|weba)$/i.test(e.name)) audioFiles.push(new File([e.bytes], e.name, { type: mimeFromName(e.name) }))
+  }
+  await addLibFiles(sceneFiles)
+  if (audioFiles[0]) setSong(audioFiles[0])
+  let report = `Restored ${sceneFiles.length} clip${sceneFiles.length === 1 ? '' : 's'}` + (audioFiles[0] ? ' + song' : '')
+  if (cue) { const { added, missing } = importCueText(cue); report += `, ${added} placement${added === 1 ? '' : 's'}` + (missing ? ` (${missing} skipped)` : '') }
+  renderLib(); updateTlPreview()
+  $('tlStatus').textContent = report + '.'
+}
+
 function openTimeline () { renderLib(); $('tlModal').hidden = false }
 $('btnTimeline').onclick = openTimeline
 $('tlClose').onclick = () => { $('tlModal').hidden = true }
 $('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('tlModal').hidden = true })
 $('tlAddFiles').onchange = () => { const fs = Array.from($('tlAddFiles').files || []); if (fs.length) addLibFiles(fs); $('tlAddFiles').value = '' }
-$('tlAdd').onclick = addTlRow
+$('tlAdd').onclick = () => addTlRow()
 $('tlDownload').onclick = downloadCue
 $('tlBundle').onclick = downloadBundle
-$('tlAudio').onchange = () => {
-  const f = $('tlAudio').files[0]; if (!f) return
-  if (tlAudioUrl) URL.revokeObjectURL(tlAudioUrl)
-  tlAudioFile = f; tlAudioUrl = URL.createObjectURL(f)
-  const a = $('tlPlayer'); a.src = tlAudioUrl; a.style.display = 'block'; $('tlAudioName').textContent = f.name
-}
+$('tlLoadBundle').onchange = () => { const f = $('tlLoadBundle').files[0]; if (f) loadBundleFile(f); $('tlLoadBundle').value = '' }
+$('tlLoadCue').onchange = () => { const f = $('tlLoadCue').files[0]; if (f) loadCueFile(f); $('tlLoadCue').value = '' }
+$('tlAudio').onchange = () => setSong($('tlAudio').files[0])
 $('tlPlayer').addEventListener('timeupdate', updateTlPreview)
 $('tlPlayer').addEventListener('seeked', updateTlPreview)
 
