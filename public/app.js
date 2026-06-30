@@ -789,6 +789,17 @@ function sortTl () {
   rows.sort((a, b) => (parseLrcTime(a.querySelector('.tl-time').value) ?? 1e9) - (parseLrcTime(b.querySelector('.tl-time').value) ?? 1e9))
   rows.forEach(r => list.append(r)); renumberTl()
 }
+// Reorder a clip: swap its start time with the neighbour's (dir -1 = earlier/up, +1 = later/down), keeping the
+// time slots intact — so the clip slides up/down the sequence and takes the neighbour's slot. The row (with its
+// move buttons) follows the clip, so repeated clicks keep moving the same clip.
+function moveTlRow (li, dir) {
+  const rows = Array.from($('tlList').children)
+  const i = rows.indexOf(li), j = i + dir
+  if (j < 0 || j >= rows.length) return
+  const a = li.querySelector('.tl-time'), b = rows[j].querySelector('.tl-time')
+  const tmp = a.value; a.value = b.value; b.value = tmp
+  sortTl(); updateTlPreview()
+}
 function addTlRow () {
   if (tlLib.size === 0) { $('tlStatus').textContent = 'Add a scene clip first (section ①).'; return }
   const li = document.createElement('li'); li.className = 'tl-step'
@@ -796,13 +807,17 @@ function addTlRow () {
   const sel = sceneSelect('') // defaults to the first library clip
   const time = document.createElement('input'); time.type = 'text'; time.className = 'tl-time'; time.value = '00:00.00'; time.placeholder = '00:00.00'
   const setB = document.createElement('button'); setB.className = 'ghost tl-set'; setB.type = 'button'; setB.textContent = '⏱ Set'; setB.title = 'Set start from the song’s current position'
+  const upB = document.createElement('button'); upB.className = 'ghost tl-move'; upB.type = 'button'; upB.textContent = '↑'; upB.title = 'Move this clip earlier (swap slot with the one above)'
+  const dnB = document.createElement('button'); dnB.className = 'ghost tl-move'; dnB.type = 'button'; dnB.textContent = '↓'; dnB.title = 'Move this clip later (swap slot with the one below)'
   const delB = document.createElement('button'); delB.className = 'ghost tl-del'; delB.type = 'button'; delB.textContent = '✕'; delB.title = 'Remove'
   const a = $('tlPlayer'); if (a.src && a.currentTime > 0) time.value = fmtLrc(a.currentTime) // default to current position
   sel.onchange = () => { renderLib(); updateTlPreview() }
   setB.onclick = () => { if (!a.src) { $('tlStatus').textContent = 'Load a song first, then scrub + Set.'; return } time.value = fmtLrc(a.currentTime); sortTl(); updateTlPreview() }
+  upB.onclick = () => moveTlRow(li, -1)
+  dnB.onclick = () => moveTlRow(li, 1)
   time.onchange = () => { sortTl(); updateTlPreview() }
   delB.onclick = () => { li.remove(); renumberTl(); renderLib(); updateTlPreview() }
-  li.append(num, sel, time, setB, delB)
+  li.append(num, sel, time, upB, dnB, setB, delB)
   $('tlList').append(li); sortTl(); renderLib(); updateTlPreview()
 }
 function tlPlacements () {
