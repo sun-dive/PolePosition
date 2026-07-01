@@ -49,3 +49,6 @@ AI images use **fal.ai** with its own `FAL_API_KEY` (in a local `.env`); Claude 
 ## Status
 
 Evolving, and broader than an ebook tool. Shipped today: the chapter editor + AI writing (Book Factory, whole-book context), AI covers/chapter art (generate/edit/animate), the sequence, music-video (scene-timeline → cue + bundle), lyrics, and WAV→FLAC media tooling, plus EPUB/PDF export. On-chain publishing happens by minting the exported assets in **PharLap** (an integrated in-app mint handoff is still to come).
+
+## License
+© 2026 sun-dive. Licensed under the **Open BSV License Version 6** — see [LICENSE](./LICENSE). © BSV Association. The software, and anything derived from it, **may only be used on the BSV Blockchain**.
