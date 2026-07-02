@@ -2,11 +2,38 @@
   "name": "poleposition",
   "version": "1.0.0",
   "description": "The **create** corner of the trinity — a local-first studio to write & illustrate an ebook with AI help, then mint it as a SMART NFT.",
-  "main": "index.js",
+  "main": "electron/main.mjs",
   "scripts": {
     "build:editor": "node build-editor.mjs",
     "postinstall": "node build-editor.mjs",
+    "start": "node server.mjs",
+    "electron": "electron .",
+    "dist": "electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "build": {
+    "appId": "com.sundive.poleposition",
+    "productName": "Pole Position",
+    "directories": {
+      "output": "dist-app"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo"
+    }
   },
   "keywords": [],
   "author": "sun-dive",
@@ -17,6 +44,8 @@
     "@milkdown/crepe": "^7.5.0"
   },
   "devDependencies": {
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.23.0"
   }
 }

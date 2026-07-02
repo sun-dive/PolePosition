@@ -3,6 +3,9 @@ node_modules/
 *.local
 .DS_Store
 
+# electron-builder installer output
+dist-app/
+
 # generated rich-editor bundle (rebuilt by `npm run build:editor`)
 public/editor.bundle.js
 public/editor.bundle.css
