@@ -444,6 +444,68 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // ── Tag a FLAC (in-app Kid3): text tags + cover art by role (front/back/media) + lyrics, via metaflac ──
+  // Body (JSON): { flac:<base64>, tags:{TITLE,ARTIST,ALBUM,DATE,COPYRIGHT,TRACKNUMBER,GENRE,…},
+  //                lyrics:"<lrc/plain>", pictures:[{type:3|4|6, mime, width?, height?, data:<base64>}] }
+  if (url.pathname === '/api/tag' && req.method === 'POST') {
+    const stamp = Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const flacPath = join(tmpdir(), 'pp-tag-' + stamp + '.flac')
+    const tmp = [] // extra temp files (lyrics + pictures) to clean up
+    try {
+      const raw = await readRawBody(req, 800 * 1024 * 1024)
+      let job
+      try { job = JSON.parse(raw.toString('utf8')) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+      if (!job || typeof job.flac !== 'string' || !job.flac) return sendJson(res, 400, { error: 'no FLAC provided' })
+      await writeFile(flacPath, Buffer.from(job.flac, 'base64'))
+
+      const tags = (job.tags && typeof job.tags === 'object') ? job.tags : {}
+      const clean = Object.entries(tags)
+        .map(([k, v]) => [String(k).toUpperCase().replace(/[^A-Z0-9_]/g, ''), v])
+        .filter(([k, v]) => k && v != null && String(v).trim() !== '')
+      const hasLyrics = typeof job.lyrics === 'string' && job.lyrics.trim() !== ''
+      const pics = Array.isArray(job.pictures) ? job.pictures.filter(p => p && typeof p.data === 'string' && p.data) : []
+
+      // Pass 1 — remove what we're about to (re)write, so re-tagging never duplicates (leaves other tags intact).
+      // metaflac forbids mixing "shorthand" ops (--remove-tag) with "major" ops (--remove) in one call → split.
+      const rmTags = []
+      for (const [k] of clean) rmTags.push('--remove-tag=' + k)
+      if (hasLyrics) rmTags.push('--remove-tag=LYRICS')
+      if (rmTags.length) await runCmd('metaflac', [...rmTags, flacPath])
+      if (pics.length) await runCmd('metaflac', ['--remove', '--block-type=PICTURE', flacPath])
+
+      // Pass 2 — write text tags, lyrics (from a temp file → multi-line safe), and pictures by type.
+      const set = []
+      for (const [k, v] of clean) set.push('--set-tag=' + k + '=' + String(v))
+      if (hasLyrics) {
+        const lp = join(tmpdir(), 'pp-lyr-' + stamp + '.txt'); tmp.push(lp)
+        await writeFile(lp, job.lyrics)
+        set.push('--set-tag-from-file=LYRICS=' + lp)
+      }
+      for (let i = 0; i < pics.length; i++) {
+        const p = pics[i]
+        const type = [3, 4, 6].includes(Number(p.type)) ? Number(p.type) : 3 // 3 front · 4 back · 6 media/disc
+        const mime = (typeof p.mime === 'string' && p.mime.startsWith('image/')) ? p.mime : 'image/png'
+        const ext = mime.split('/')[1].replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'png'
+        const pp = join(tmpdir(), 'pp-pic-' + stamp + '-' + i + '.' + ext); tmp.push(pp)
+        await writeFile(pp, Buffer.from(p.data, 'base64'))
+        const w = Number(p.width) || 0, h = Number(p.height) || 0
+        // spec: TYPE|MIME|DESCRIPTION|WIDTHxHEIGHTxDEPTH|FILE  (metaflac reads it as a single arg via spawn)
+        set.push('--import-picture-from=' + `${type}|${mime}||${w && h ? `${w}x${h}x24` : '0x0x0'}|${pp}`)
+      }
+      if (!set.length) return sendJson(res, 400, { error: 'nothing to write — add text tags, cover art, or lyrics' })
+      await runCmd('metaflac', [...set, flacPath])
+
+      const out = await readFile(flacPath)
+      res.writeHead(200, { 'content-type': 'audio/flac', 'content-disposition': 'attachment; filename="tagged.flac"', 'x-flac-size': String(out.length) })
+      return res.end(out)
+    } catch (e) {
+      return sendJson(res, 502, { error: 'tagging failed: ' + (e.message || 'error') })
+    } finally {
+      await unlink(flacPath).catch(() => {})
+      await Promise.all(tmp.map(f => unlink(f).catch(() => {})))
+    }
+  }
+
   // ── EPUB export (P4) ──
   if (url.pathname === '/api/epub' && req.method === 'POST') {
     let body

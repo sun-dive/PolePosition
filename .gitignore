@@ -22,7 +22,8 @@ public/editor.bundle.css
 /*.webp
 public/art/
 
-# private planning doc
+# private planning docs
 PLAN.md
+UI_PLAN.md
 workshop-starter.json
 main-book-starter.json

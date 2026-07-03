@@ -1121,6 +1121,76 @@ $('flacEncode').onclick = async () => {
   finally { $('flacEncode').disabled = false }
 }
 
+/* ---- 🏷️ Tag editor: embed cover art by role + lyrics + text tags into a FLAC (/api/tag → metaflac) ---- */
+let tagFlacFile = null
+const tagArt = { front: null, back: null, media: null } // each: { data:<base64>, mime, width, height }
+
+function bytesToBase64 (bytes) { // chunked so it handles multi-MB files without blowing the call stack
+  let bin = ''; const CH = 0x8000
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH))
+  return btoa(bin)
+}
+function imageDims (file) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file); const im = new Image()
+    im.onload = () => { resolve({ w: im.naturalWidth || 0, h: im.naturalHeight || 0 }); URL.revokeObjectURL(url) }
+    im.onerror = () => { resolve({ w: 0, h: 0 }); URL.revokeObjectURL(url) }
+    im.src = url
+  })
+}
+function openTag () {
+  if (!$('tagArtist').value) $('tagArtist').value = 'Evidnus'
+  if (!$('tagCopyright').value) $('tagCopyright').value = '© ' + new Date().getFullYear() + ' sun-dive'
+  $('tagModal').hidden = false
+}
+$('btnTag').onclick = openTag
+$('tagClose').onclick = () => { $('tagModal').hidden = true }
+$('tagModal').addEventListener('click', e => { if (e.target === $('tagModal')) $('tagModal').hidden = true })
+$('tagFlac').onchange = () => {
+  tagFlacFile = $('tagFlac').files[0] || null
+  $('tagFlacName').textContent = tagFlacFile ? tagFlacFile.name : ''
+  $('tagStatus').textContent = ''
+  if (tagFlacFile && !$('tagTitle').value) $('tagTitle').value = tagFlacFile.name.replace(/\.flac$/i, '').replace(/_+/g, ' ')
+}
+function wireArtSlot (role, inputId, imgId, xId) {
+  $(inputId).onchange = async () => {
+    const f = $(inputId).files[0]; if (!f) return
+    const bytes = new Uint8Array(await f.arrayBuffer())
+    const { w, h } = await imageDims(f)
+    tagArt[role] = { data: bytesToBase64(bytes), mime: f.type || 'image/png', width: w, height: h }
+    const img = $(imgId); img.src = URL.createObjectURL(f); img.hidden = false; $(xId).hidden = false
+  }
+  $(xId).onclick = () => { tagArt[role] = null; $(imgId).hidden = true; $(imgId).removeAttribute('src'); $(xId).hidden = true; $(inputId).value = '' }
+}
+wireArtSlot('front', 'tagArtFront', 'tagArtFrontImg', 'tagArtFrontX')
+wireArtSlot('back', 'tagArtBack', 'tagArtBackImg', 'tagArtBackX')
+wireArtSlot('media', 'tagArtMedia', 'tagArtMediaImg', 'tagArtMediaX')
+$('tagLrc').onchange = async () => { const f = $('tagLrc').files[0]; if (f) $('tagLyrics').value = await f.text() }
+$('tagWrite').onclick = async () => {
+  if (!tagFlacFile) { $('tagStatus').textContent = 'Load a FLAC first.'; return }
+  $('tagWrite').disabled = true; $('tagStatus').textContent = 'Reading FLAC…'
+  try {
+    const flacBytes = new Uint8Array(await tagFlacFile.arrayBuffer())
+    const tags = {
+      TITLE: $('tagTitle').value.trim(), ARTIST: $('tagArtist').value.trim(), ALBUM: $('tagAlbum').value.trim(),
+      DATE: $('tagYear').value.trim(), TRACKNUMBER: $('tagTrack').value.trim(), GENRE: $('tagGenre').value.trim(),
+      COPYRIGHT: $('tagCopyright').value.trim(),
+    }
+    const pictures = []
+    if (tagArt.front) pictures.push({ type: 3, ...tagArt.front })
+    if (tagArt.back) pictures.push({ type: 4, ...tagArt.back })
+    if (tagArt.media) pictures.push({ type: 6, ...tagArt.media })
+    $('tagStatus').textContent = 'Embedding tags… (large files take a moment)'
+    const job = { flac: bytesToBase64(flacBytes), tags, lyrics: $('tagLyrics').value, pictures }
+    const r = await fetch('/api/tag', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(job) })
+    if (!r.ok) { const d = await r.json().catch(() => ({})); $('tagStatus').textContent = d.error || ('Error ' + r.status); return }
+    const blob = await r.blob()
+    triggerDownload(blob, tagFlacFile.name.replace(/\.flac$/i, '') + '-tagged.flac')
+    $('tagStatus').textContent = `Done — tagged FLAC downloaded (${(blob.size / 1048576).toFixed(1)} MB). Ready to mint in PharLap.`
+  } catch (e) { $('tagStatus').textContent = 'Failed — is the server running? ' + e.message }
+  finally { $('tagWrite').disabled = false }
+}
+
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
 const ART_TEMPLATES = [
