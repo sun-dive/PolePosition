@@ -76,14 +76,17 @@ async function switchProject (id) {
   flash('Opened “' + (book.title || 'Untitled') + '”')
 }
 function newProject () {
+  // No prompt() here: Electron doesn't support window.prompt (it throws), which silently killed this
+  // button in the desktop app. Instead create the book with a default name and focus the title field —
+  // typing the title renames the book live (see the #bookTitle oninput handler).
   flushRich(); saveNow()
-  const name = (prompt('Name your new book (you can rename it anytime):', '') || '').trim()
-  const id = pid(); const b = normalize(blank()); b.title = name
-  projects.list.push({ id, name: name || 'Untitled' }); projects.activeId = id; persistIndex()
+  const id = pid(); const b = normalize(blank()); b.title = ''
+  projects.list.push({ id, name: 'Untitled book' }); projects.activeId = id; persistIndex()
   try { localStorage.setItem(bookKey(id), JSON.stringify(b)) } catch {}
   book = b
   loadActiveIntoEditor()
-  flash('New book created — start writing.')
+  const t = $('bookTitle'); if (t) { t.focus() }
+  flash('New book created — give it a title to start.')
 }
 function duplicateProject () {
   flushRich(); saveNow()
@@ -220,7 +223,11 @@ function importDraft (file) {
 /* ---- wire up ---- */
 $('bookTitle').value = book.title || ''
 $('bookAuthor').value = book.author || ''
-$('bookTitle').oninput = e => { book.title = e.target.value; save(); recordSoon() }
+$('bookTitle').oninput = e => {
+  book.title = e.target.value; save(); recordSoon()
+  const p = projects.list.find(p => p.id === projects.activeId) // keep the project dropdown in sync as you type
+  if (p) { p.name = e.target.value.trim() || 'Untitled book'; persistIndex(); renderProjects() }
+}
 $('bookAuthor').oninput = e => { book.author = e.target.value; save(); recordSoon() }
 $('chapterTitle').oninput = e => { active().title = e.target.value; renderChapters(); save(); recordSoon() }
 $('chapterBody').oninput = e => { active().body = e.target.value; renderPreview(); save(); recordSoon() }
