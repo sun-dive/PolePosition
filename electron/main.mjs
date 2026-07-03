@@ -75,8 +75,14 @@ function createWindow (port) {
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   })
   void win.loadURL(`http://127.0.0.1:${port}`)
-  // External links (fal docs, etc.) open in the system browser, not a stray Electron window.
-  win.webContents.setWindowOpenHandler(({ url }) => { void shell.openExternal(url); return { action: 'deny' } })
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // The PDF export opens a blank window and writes the print view into it — let Electron create that window.
+    // (Denying it and shell-opening the URL is what caused "Could not read file about:blank".)
+    if (url === 'about:blank' || url === '') return { action: 'allow' }
+    // Real external links (fal docs, etc.) open in the system browser, not a stray Electron window.
+    void shell.openExternal(url)
+    return { action: 'deny' }
+  })
 }
 
 app.whenReady().then(async () => {
