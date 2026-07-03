@@ -307,9 +307,37 @@
       </div>
       <textarea id="tagLyrics" rows="4" style="width:100%; margin-top:6px" placeholder="[00:00.00]First line…"></textarea>
       <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px">
+        <button id="tagPreview" class="ghost" type="button" title="Preview how it plays once minted (disc/cover + synced lyrics)">▶ Preview</button>
         <button id="tagWrite" class="ai-btn" type="button">💾 Write tags → FLAC</button>
         <span id="tagStatus" class="dim" style="font-size:12px"></span>
       </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes pv-spin { to { transform: rotate(360deg); } }
+    #pvArt.spin { animation: pv-spin 8s linear infinite; }
+    #pvArt.spin.pv-paused { animation-play-state: paused; }
+    #pvLyric { max-height:120px; overflow:auto; }
+    #pvLyric .pv-line { opacity:.45; padding:1px 0; transition:opacity .18s; }
+    #pvLyric .pv-line.pv-on { opacity:1; font-weight:600; color:#ffb84d; }
+    #previewModal button.active { border-color:#ffb84d; color:#ffb84d; }
+  </style>
+
+  <div id="previewModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:520px; text-align:center">
+      <div class="modal-head"><b>▶ Preview — as it plays once minted</b><button id="pvClose" class="ghost" type="button">✕</button></div>
+      <div style="display:flex; justify-content:center; margin:6px 0 10px">
+        <img id="pvArt" style="width:220px; height:220px; object-fit:cover; border-radius:10px; background:rgba(0,0,0,.25)" alt="">
+      </div>
+      <div class="row" style="justify-content:center; gap:8px; margin-bottom:8px; flex-wrap:wrap">
+        <button id="pvDisc" class="ghost" type="button">📀 Disc</button>
+        <button id="pvCover" class="ghost" type="button">🖼️ Front</button>
+        <button id="pvBack" class="ghost" type="button" hidden>🔄 Back</button>
+        <span id="pvMeta" class="dim" style="font-size:12px; align-self:center"></span>
+      </div>
+      <div id="pvLyric" style="font-size:14px; line-height:1.5; margin:4px auto 10px; max-width:440px"></div>
+      <audio id="pvAudio" controls style="width:100%"></audio>
     </div>
   </div>
 

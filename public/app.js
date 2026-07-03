@@ -1122,8 +1122,71 @@ $('flacEncode').onclick = async () => {
 }
 
 /* ---- 🏷️ Tag editor: embed cover art by role + lyrics + text tags into a FLAC (/api/tag → metaflac) ---- */
-let tagFlacFile = null
+let tagFlacFile = null, tagFlacBuf = null
 const tagArt = { front: null, back: null, media: null } // each: { data:<base64>, mime, width, height }
+
+// Read a FLAC's existing metadata client-side (so the editor + preview reflect what's ALREADY embedded).
+function parseFlacMeta (arrayBuffer) {
+  const u8 = new Uint8Array(arrayBuffer), dv = new DataView(arrayBuffer)
+  const out = { tags: {}, lyrics: '', pictures: [] }
+  if (u8.length < 4 || u8[0] !== 0x66 || u8[1] !== 0x4c || u8[2] !== 0x61 || u8[3] !== 0x43) return out // "fLaC"
+  let pos = 4
+  for (let g = 0; g < 4096; g++) {
+    if (pos + 4 > u8.length) break
+    const header = u8[pos], last = (header & 0x80) !== 0, type = header & 0x7f
+    const len = (u8[pos + 1] << 16) | (u8[pos + 2] << 8) | u8[pos + 3]
+    const body = pos + 4
+    if (body + len > u8.length) break // truncated
+    if (type === 4) { // VORBIS_COMMENT — 32-bit LITTLE-endian lengths
+      let p = body
+      const vlen = dv.getUint32(p, true); p += 4 + vlen
+      const n = dv.getUint32(p, true); p += 4
+      for (let i = 0; i < n && p + 4 <= body + len; i++) {
+        const clen = dv.getUint32(p, true); p += 4
+        const s = new TextDecoder().decode(u8.subarray(p, p + clen)); p += clen
+        const eq = s.indexOf('=')
+        if (eq > 0) {
+          const k = s.slice(0, eq).toUpperCase(), v = s.slice(eq + 1)
+          if (k === 'LYRICS' || k === 'UNSYNCEDLYRICS') { if (!out.lyrics) out.lyrics = v } else out.tags[k] = v
+        }
+      }
+    } else if (type === 6) { // PICTURE — 32-bit BIG-endian fields
+      let p = body
+      const picType = dv.getUint32(p); p += 4
+      const mlen = dv.getUint32(p); p += 4
+      const mime = new TextDecoder().decode(u8.subarray(p, p + mlen)); p += mlen
+      const dlen = dv.getUint32(p); p += 4 + dlen
+      const width = dv.getUint32(p); p += 4
+      const height = dv.getUint32(p); p += 4 + 4 + 4 // + depth + colors
+      const datalen = dv.getUint32(p); p += 4
+      out.pictures.push({ type: picType, mime, width, height, bytes: u8.slice(p, p + datalen) })
+    }
+    pos = body + len
+    if (last) break
+  }
+  return out
+}
+function resetTagEditor () { // each file load starts clean — nothing stale/default carries over to block it
+  for (const id of ['tagTitle', 'tagArtist', 'tagAlbum', 'tagYear', 'tagTrack', 'tagGenre', 'tagCopyright', 'tagLyrics']) $(id).value = ''
+  tagArt.front = tagArt.back = tagArt.media = null
+  for (const [imgId, xId] of [['tagArtFrontImg', 'tagArtFrontX'], ['tagArtBackImg', 'tagArtBackX'], ['tagArtMediaImg', 'tagArtMediaX']]) {
+    $(imgId).hidden = true; $(imgId).removeAttribute('src'); $(xId).hidden = true
+  }
+}
+function prefillFromMeta (meta) {
+  const set = (id, v) => { if (v) $(id).value = v } // the loaded file wins — show exactly what's embedded
+  set('tagTitle', meta.tags.TITLE); set('tagArtist', meta.tags.ARTIST); set('tagAlbum', meta.tags.ALBUM)
+  set('tagYear', meta.tags.DATE || meta.tags.YEAR); set('tagTrack', meta.tags.TRACKNUMBER || meta.tags.TRACK)
+  set('tagGenre', meta.tags.GENRE); set('tagCopyright', meta.tags.COPYRIGHT)
+  if (meta.lyrics) $('tagLyrics').value = meta.lyrics
+  const slots = { front: ['tagArtFrontImg', 'tagArtFrontX'], back: ['tagArtBackImg', 'tagArtBackX'], media: ['tagArtMediaImg', 'tagArtMediaX'] }
+  for (const p of meta.pictures) {
+    const role = p.type === 4 ? 'back' : p.type === 6 ? 'media' : 'front'
+    tagArt[role] = { data: bytesToBase64(p.bytes), mime: p.mime || 'image/png', width: p.width || 0, height: p.height || 0 }
+    const [imgId, xId] = slots[role]
+    $(imgId).src = base64ToUrl(tagArt[role].data, tagArt[role].mime); $(imgId).hidden = false; $(xId).hidden = false
+  }
+}
 
 function bytesToBase64 (bytes) { // chunked so it handles multi-MB files without blowing the call stack
   let bin = ''; const CH = 0x8000
@@ -1138,19 +1201,25 @@ function imageDims (file) {
     im.src = url
   })
 }
-function openTag () {
-  if (!$('tagArtist').value) $('tagArtist').value = 'Evidnus'
-  if (!$('tagCopyright').value) $('tagCopyright').value = '© ' + new Date().getFullYear() + ' sun-dive'
-  $('tagModal').hidden = false
-}
+function openTag () { $('tagModal').hidden = false }
 $('btnTag').onclick = openTag
 $('tagClose').onclick = () => { $('tagModal').hidden = true }
 $('tagModal').addEventListener('click', e => { if (e.target === $('tagModal')) $('tagModal').hidden = true })
-$('tagFlac').onchange = () => {
-  tagFlacFile = $('tagFlac').files[0] || null
+$('tagFlac').onchange = async () => {
+  tagFlacFile = $('tagFlac').files[0] || null; tagFlacBuf = null
+  resetTagEditor() // clear stale/default values so the loaded file's own tags show through
   $('tagFlacName').textContent = tagFlacFile ? tagFlacFile.name : ''
   $('tagStatus').textContent = ''
-  if (tagFlacFile && !$('tagTitle').value) $('tagTitle').value = tagFlacFile.name.replace(/\.flac$/i, '').replace(/_+/g, ' ')
+  if (!tagFlacFile) return
+  $('tagStatus').textContent = 'Reading existing tags…'
+  try {
+    tagFlacBuf = await tagFlacFile.arrayBuffer() // cached — reused when writing, so no second read
+    prefillFromMeta(parseFlacMeta(tagFlacBuf))
+    $('tagStatus').textContent = 'Loaded — existing art / lyrics / tags shown below (edit, then Write or Preview).'
+  } catch (e) { $('tagStatus').textContent = 'Loaded (couldn’t read existing tags: ' + e.message + ')' }
+  // fallbacks only for what the file didn't carry (never overrides an embedded value)
+  if (!$('tagTitle').value) $('tagTitle').value = tagFlacFile.name.replace(/\.flac$/i, '').replace(/_+/g, ' ')
+  if (!$('tagCopyright').value) $('tagCopyright').value = '© ' + new Date().getFullYear() + ' sun-dive'
 }
 function wireArtSlot (role, inputId, imgId, xId) {
   $(inputId).onchange = async () => {
@@ -1170,7 +1239,7 @@ $('tagWrite').onclick = async () => {
   if (!tagFlacFile) { $('tagStatus').textContent = 'Load a FLAC first.'; return }
   $('tagWrite').disabled = true; $('tagStatus').textContent = 'Reading FLAC…'
   try {
-    const flacBytes = new Uint8Array(await tagFlacFile.arrayBuffer())
+    const flacBytes = new Uint8Array(tagFlacBuf || await tagFlacFile.arrayBuffer())
     const tags = {
       TITLE: $('tagTitle').value.trim(), ARTIST: $('tagArtist').value.trim(), ALBUM: $('tagAlbum').value.trim(),
       DATE: $('tagYear').value.trim(), TRACKNUMBER: $('tagTrack').value.trim(), GENRE: $('tagGenre').value.trim(),
@@ -1190,6 +1259,76 @@ $('tagWrite').onclick = async () => {
   } catch (e) { $('tagStatus').textContent = 'Failed — is the server running? ' + e.message }
   finally { $('tagWrite').disabled = false }
 }
+
+/* ---- ▶ Preview: play the tagged result exactly as PharLap's player renders it (disc/cover + synced lyrics) ---- */
+let pvLines = [], pvArtUrl = null, pvAudioUrl = null
+function base64ToUrl (b64, mime) {
+  const bin = atob(b64); const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return URL.createObjectURL(new Blob([bytes], { type: mime || 'image/png' }))
+}
+function parseLrcLines (text) { // synced [mm:ss.xx] lines → {t,text}; plain lines kept (t=null); skips [ti:]/[ar:] tags
+  const out = []
+  for (const line of (text || '').split(/\r?\n/)) {
+    const m = /^\s*\[(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)\]\s*(.*)$/.exec(line)
+    if (m) out.push({ t: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text: m[3] })
+    else if (line.trim() && !/^\s*\[[a-z]+:/i.test(line)) out.push({ t: null, text: line.trim() })
+  }
+  return out
+}
+function pvEsc (s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) }
+function renderPvLyrics () {
+  $('pvLyric').innerHTML = pvLines.length
+    ? pvLines.map((l, i) => `<div class="pv-line" data-i="${i}">${pvEsc(l.text || '·')}</div>`).join('')
+    : '<span class="dim" style="font-size:12px">No lyrics loaded</span>'
+}
+function setPvMode (mode) {
+  const art = mode === 'disc' ? (tagArt.media || tagArt.front) : mode === 'back' ? tagArt.back : (tagArt.front || tagArt.media)
+  $('pvDisc').classList.toggle('active', mode === 'disc')
+  $('pvCover').classList.toggle('active', mode === 'front')
+  $('pvBack').classList.toggle('active', mode === 'back')
+  const img = $('pvArt')
+  if (pvArtUrl) { URL.revokeObjectURL(pvArtUrl); pvArtUrl = null }
+  if (art) { pvArtUrl = base64ToUrl(art.data, art.mime); img.src = pvArtUrl } else { img.removeAttribute('src') }
+  const spin = mode === 'disc'
+  img.classList.toggle('spin', spin)
+  img.classList.toggle('pv-paused', $('pvAudio').paused) // the disc only turns while the audio is playing
+  img.style.borderRadius = spin ? '50%' : '10px'
+}
+function openPreview () {
+  if (!tagFlacFile) { $('tagStatus').textContent = 'Load a FLAC first.'; return }
+  if (pvAudioUrl) URL.revokeObjectURL(pvAudioUrl)
+  pvAudioUrl = URL.createObjectURL(tagFlacFile); $('pvAudio').src = pvAudioUrl
+  $('pvMeta').textContent = [$('tagTitle').value.trim(), $('tagArtist').value.trim()].filter(Boolean).join(' — ')
+  pvLines = parseLrcLines($('tagLyrics').value); renderPvLyrics()
+  $('pvBack').hidden = !tagArt.back // only offer a Back view when there's a back cover
+  setPvMode(tagArt.media ? 'disc' : (tagArt.front ? 'front' : 'disc'))
+  $('previewModal').hidden = false
+}
+function closePreview () {
+  $('previewModal').hidden = true
+  const a = $('pvAudio'); a.pause(); a.removeAttribute('src'); a.load()
+  if (pvAudioUrl) { URL.revokeObjectURL(pvAudioUrl); pvAudioUrl = null }
+  if (pvArtUrl) { URL.revokeObjectURL(pvArtUrl); pvArtUrl = null }
+}
+$('tagPreview').onclick = openPreview
+$('pvClose').onclick = closePreview
+$('previewModal').addEventListener('click', e => { if (e.target === $('previewModal')) closePreview() })
+$('pvDisc').onclick = () => setPvMode('disc')
+$('pvCover').onclick = () => setPvMode('front')
+$('pvBack').onclick = () => setPvMode('back')
+$('pvAudio').addEventListener('play', () => $('pvArt').classList.remove('pv-paused'))
+$('pvAudio').addEventListener('pause', () => $('pvArt').classList.add('pv-paused'))
+$('pvAudio').addEventListener('timeupdate', () => {
+  if (!pvLines.length) return
+  const ct = $('pvAudio').currentTime
+  let active = -1
+  for (let i = 0; i < pvLines.length; i++) if (pvLines[i].t != null && pvLines[i].t <= ct) active = i
+  $('pvLyric').querySelectorAll('.pv-line').forEach((el, i) => {
+    const on = i === active; el.classList.toggle('pv-on', on)
+    if (on) el.scrollIntoView({ block: 'nearest' })
+  })
+})
 
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
