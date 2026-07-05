@@ -65,7 +65,7 @@ function loadActiveIntoEditor () {
   renderProjects(); renderChapters()
   if (richMode) mountRich(); else renderEditor()
   resetHistory() // undo history is per-book
-  coverData = ''; updateCoverButton() // cover is per-book too
+  updateCoverButton() // book cover is per-book
 }
 async function switchProject (id) {
   if (!id || id === projects.activeId) return
@@ -524,114 +524,26 @@ document.addEventListener('keydown', e => {
 
 /* ---- Cover image generator (P3 — fal.ai via /api/image) ---- */
 const DEFAULT_COVER_PROMPT = `Premium book-cover illustration, portrait orientation. A warm cluster of glowing collectible NFTs floats in mid-air above a pair of open cupped hands that gently release them upward — a luminous ebook, a music NFT with soft sound-wave and musical-note motifs, and a framed digital artwork — each a hovering card edged in golden light. Deep charcoal background, subtle bokeh, faint flowing streams of data-particles (a quiet hint of AI and blockchain). Warm gold and amber glow against the dark; cinematic, photorealistic with a touch of magic, shallow depth of field. Bold title text near the top reading "AI Made It. You Own It." A smaller tagline beneath it reading "Content you own that pays you when it spreads." A small author credit near the bottom reading "Tommy Telford." Crisp, legible, well-kerned lettering; balanced high-end layout; highly detailed.`
-let coverData = '' // last generated/loaded cover data URL for the active book
-function updateCoverButton () { $('btnCover').classList.toggle('has-cover', !!book.cover) }
-function openCover () {
-  if (!$('coverPrompt').value.trim()) $('coverPrompt').value = DEFAULT_COVER_PROMPT
-  if (book.cover && !coverData) { coverData = book.cover; $('coverImg').src = book.cover; $('coverResult').hidden = false; $('coverStatus').textContent = 'Current cover for this book.' }
-  $('coverModal').hidden = false
+// The has-cover indicator now lives on the single 🎨 Art button (book cover is set from that unified tool).
+function updateCoverButton () { $('btnArt').classList.toggle('has-cover', !!book.cover) }
+// A shape-selector value like "1:1@800" means: generate at aspect 1:1, then resize the result to 800×800.
+// (fal's nano-banana works by aspect ratio, not pixels — so exact sizes are a client-side downscale.)
+function parseShape (v) { const [aspect, px] = String(v || '').split('@'); return { aspect: aspect || '2:3', px: px ? parseInt(px, 10) : 0 } }
+// Cover-crop-center an image data URL into a px×px WebP — the on-chain NFT cover size (matches the OG-crop pattern).
+function toSquareDataUrl (dataUrl, px) {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => {
+      const c = document.createElement('canvas'); c.width = px; c.height = px
+      const ctx = c.getContext('2d'); const s = Math.max(px / img.width, px / img.height)
+      const dw = img.width * s, dh = img.height * s
+      ctx.drawImage(img, (px - dw) / 2, (px - dh) / 2, dw, dh)
+      resolve(c.toDataURL('image/webp', 0.92))
+    }
+    img.onerror = () => resolve(dataUrl); img.src = dataUrl
+  })
 }
-function closeCover () { $('coverModal').hidden = true }
-async function generateCover () {
-  const prompt = $('coverPrompt').value.trim()
-  if (!prompt) { $('coverStatus').textContent = 'Describe the cover first.'; return }
-  $('coverGen').disabled = true; $('coverStatus').textContent = 'Generating… (can take 20–40s)'
-  try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: $('coverAspect').value || '2:3' }) })
-    const data = await r.json().catch(() => ({}))
-    if (!r.ok) { $('coverStatus').textContent = data.error || ('Error ' + r.status); return }
-    coverData = data.dataUrl
-    $('coverImg').src = coverData; $('coverResult').hidden = false; $('coverStatus').textContent = 'Done — use it, regenerate, or tweak the prompt.'
-  } catch (e) {
-    $('coverStatus').textContent = 'Request failed — is the server running? ' + e.message
-  } finally { $('coverGen').disabled = false }
-}
-function useCover () {
-  if (!coverData) return
-  book.cover = coverData; save(); updateCoverButton()
-  $('coverStatus').textContent = 'Saved as this book’s cover.'; flash('Cover saved to this book.')
-}
-function downloadCover () {
-  if (!coverData) return
-  const ext = (coverData.slice(5, coverData.indexOf(';')).split('/')[1]) || 'jpg'
-  const a = document.createElement('a')
-  a.href = coverData
-  a.download = (book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-cover.' + ext
-  a.click()
-}
-async function optimizeCoverPrompt () {
-  const description = $('coverDesc').value.trim()
-  if (!description) { $('coverOptStatus').textContent = 'Describe it first.'; return }
-  $('coverOptimize').disabled = true; $('coverOptStatus').textContent = 'Claude is writing the prompt…'
-  try {
-    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'cover', aspect: $('coverAspect').value || '2:3' }) })
-    const data = await r.json().catch(() => ({}))
-    if (!r.ok) { $('coverOptStatus').textContent = data.error || ('Error ' + r.status); return }
-    $('coverPrompt').value = (data.prompt || '').trim()
-    $('coverOptStatus').textContent = 'Prompt ready — tweak it or Generate.'
-  } catch (e) {
-    $('coverOptStatus').textContent = 'Request failed — is the server running? ' + e.message
-  } finally { $('coverOptimize').disabled = false }
-}
-async function editCover () {
-  if (!coverData) { $('coverEditStatus').textContent = 'Generate or open an image first.'; return }
-  const instr = $('coverEditInstr').value.trim()
-  if (!instr) { $('coverEditStatus').textContent = 'Describe the change first.'; return }
-  $('coverEdit').disabled = true; $('coverEditStatus').textContent = 'Editing this image… (can take 20–40s)'
-  try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: coverData }) })
-    const data = await r.json().catch(() => ({}))
-    if (!r.ok) { $('coverEditStatus').textContent = data.error || ('Error ' + r.status); return }
-    coverData = data.dataUrl; $('coverImg').src = coverData
-    $('coverEditInstr').value = ''; $('coverEditStatus').textContent = 'Edited — Use/Download, or refine again.'
-  } catch (e) {
-    $('coverEditStatus').textContent = 'Request failed — is the server running? ' + e.message
-  } finally { $('coverEdit').disabled = false }
-}
-
-let coverAnimData = '' // last animated cover (data URL — webp or gif)
-async function animateCover () {
-  if (!coverData) { $('coverAnimStatus').textContent = 'Generate or open an image first.'; return }
-  const prompt = $('coverAnimPrompt').value.trim()
-  $('coverAnimate').disabled = true
-  $('coverAnimStatus').textContent = 'Animating… (image→video can take a minute or two)'
-  try {
-    const r = await fetch('/api/animate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: coverData, prompt }) })
-    const data = await r.json().catch(() => ({}))
-    if (!r.ok) { $('coverAnimStatus').textContent = data.error || ('Error ' + r.status); return }
-    coverAnimData = data.dataUrl
-    $('coverAnimImg').src = coverAnimData; $('coverAnimResult').hidden = false
-    $('coverAnimStatus').textContent = 'Done (' + (data.ext || 'webp') + ') — download it, then embed it as the FLAC cover in Kid3.'
-  } catch (e) {
-    $('coverAnimStatus').textContent = 'Request failed — is the server running? ' + e.message
-  } finally { $('coverAnimate').disabled = false }
-}
-function downloadCoverAnim () {
-  if (!coverAnimData) return
-  const ext = coverAnimData.slice(5, coverAnimData.indexOf(';')).split('/')[1] || 'webp'
-  const a = document.createElement('a')
-  a.href = coverAnimData
-  a.download = (book.title || 'cover').replace(/[^\w.-]+/g, '_') + '-animated.' + ext
-  a.click()
-}
-
-$('coverOptimize').onclick = optimizeCoverPrompt
-$('coverEdit').onclick = editCover
-$('btnCover').onclick = openCover
-$('coverClose').onclick = closeCover
-$('coverModal').addEventListener('click', e => { if (e.target === $('coverModal')) closeCover() })
-$('coverGen').onclick = generateCover
-$('coverUse').onclick = useCover
-$('coverDownload').onclick = downloadCover
-$('coverAnimate').onclick = animateCover
-$('coverAnimDownload').onclick = downloadCoverAnim
-$('coverOpen').onclick = () => $('coverFile').click()
-$('coverFile').onchange = e => {
-  const f = e.target.files[0]; if (!f) return
-  const rd = new FileReader()
-  rd.onload = () => { coverData = rd.result; $('coverImg').src = coverData; $('coverResult').hidden = false; $('coverStatus').textContent = 'Image loaded — refine it below, or use/download.' }
-  rd.readAsDataURL(f); e.target.value = ''
-}
+// (The old separate Cover generator/animator lived here — merged into the single 🎨 Art tool below.)
 
 /* ---- Sequence clips → a looping animated WebP cover (add clip ×N each, choose frame rate) ---- */
 function renumberSeq () { Array.from($('seqList').children).forEach((li, i) => { li.querySelector('.seq-num').textContent = (i + 1) }) }
@@ -1359,7 +1271,8 @@ async function optimizeArtPrompt () {
   if (!description) { $('artOptStatus').textContent = 'Describe it first.'; return }
   $('artOptimize').disabled = true; $('artOptStatus').textContent = 'Claude is writing the prompt…'
   try {
-    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind: 'inline', style: $('artStyle').value.trim(), aspect: $('artAspect').value }) })
+    const kind = $('artPurpose').value === 'cover' ? 'cover' : 'inline'
+    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, kind, style: $('artStyle').value.trim(), aspect: parseShape($('artAspect').value).aspect }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artOptStatus').textContent = data.error || ('Error ' + r.status); return }
     $('artPrompt').value = (data.prompt || '').trim(); $('artOptStatus').textContent = 'Prompt ready — tweak it or Generate.'
@@ -1370,7 +1283,7 @@ async function generateArt () {
   const base = $('artPrompt').value.trim()
   if (!base) { $('artStatus').textContent = 'Describe/optimize a prompt first.'; return }
   const style = $('artStyle').value.trim()
-  const aspect = $('artAspect').value
+  const { aspect, px } = parseShape($('artAspect').value)
   const frame = aspect === '16:9' ? 'Full-bleed wide landscape composition that fills the entire frame edge to edge — no empty side margins, not a small centred motif.'
     : aspect === '3:4' ? 'Full-bleed tall portrait composition that fills the frame top to bottom.'
     : 'Full-bleed composition that fills the entire square frame.'
@@ -1380,7 +1293,8 @@ async function generateArt () {
     const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: aspect }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artStatus').textContent = data.error || ('Error ' + r.status); return }
-    artData = data.dataUrl; $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = 'Done — insert, refine, or regenerate.'
+    artData = px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl
+    $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = px ? `Done (${px}×${px}) — insert, refine, or regenerate.` : 'Done — insert, refine, or regenerate.'
   } catch (e) { $('artStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artGen').disabled = false }
 }
@@ -1393,7 +1307,8 @@ async function editArt () {
     const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: artData }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artEditStatus').textContent = data.error || ('Error ' + r.status); return }
-    artData = data.dataUrl; $('artImg').src = artData; $('artEditInstr').value = ''; $('artEditStatus').textContent = 'Edited — insert, or refine again.'
+    { const px = parseShape($('artAspect').value).px; artData = px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl }
+    $('artImg').src = artData; $('artEditInstr').value = ''; $('artEditStatus').textContent = 'Edited — insert, or refine again.'
   } catch (e) { $('artEditStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artEdit').disabled = false }
 }
@@ -1436,15 +1351,46 @@ function downloadBannerJpeg () {
   img.onerror = () => { $('artStatus').textContent = 'Could not load the image for banner export.' }
   img.src = artData
 }
+// Use the current image as THIS book's cover (the merged tool replaces the old Cover generator).
+function useArtAsCover () {
+  if (!artData) { $('artStatus').textContent = 'Generate or open an image first.'; return }
+  book.cover = artData; save(); updateCoverButton()
+  $('artStatus').textContent = 'Saved as this book’s cover.'; flash('Cover saved to this book.')
+}
+// Animate THIS image → a short looping WebP (fal image→video). For animated covers / FLAC art.
+let artAnimData = ''
+async function animateArt () {
+  if (!artData) { $('artAnimStatus').textContent = 'Generate or open an image first.'; return }
+  const prompt = $('artAnimPrompt').value.trim()
+  $('artAnimate').disabled = true; $('artAnimStatus').textContent = 'Animating… (image→video can take a minute or two)'
+  try {
+    const r = await fetch('/api/animate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: artData, prompt }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('artAnimStatus').textContent = data.error || ('Error ' + r.status); return }
+    artAnimData = data.dataUrl; $('artAnimImg').src = artAnimData; $('artAnimResult').hidden = false
+    $('artAnimStatus').textContent = 'Done (' + (data.ext || 'webp') + ') — download it for an animated cover / FLAC art.'
+  } catch (e) { $('artAnimStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('artAnimate').disabled = false }
+}
+function downloadArtAnim () {
+  if (!artAnimData) return
+  const ext = artAnimData.slice(5, artAnimData.indexOf(';')).split('/')[1] || 'webp'
+  const a = document.createElement('a'); a.href = artAnimData
+  a.download = (book.title || 'art').replace(/[^\w.-]+/g, '_') + '-animated.' + ext; a.click()
+}
 $('btnArt').onclick = openArt
 $('artClose').onclick = closeArt
 $('artModal').addEventListener('click', e => { if (e.target === $('artModal')) closeArt() })
 $('artOptimize').onclick = optimizeArtPrompt
 $('artGen').onclick = generateArt
 $('artEdit').onclick = editArt
+$('artUseCover').onclick = useArtAsCover
 $('artInsert').onclick = insertArt
 $('artDownload').onclick = downloadArt
 $('artBanner').onclick = downloadBannerJpeg
+$('artAnimate').onclick = animateArt
+$('artAnimDownload').onclick = downloadArtAnim
+$('artPurpose').onchange = e => { if (e.target.value === 'cover' && !$('artPrompt').value.trim()) $('artPrompt').value = DEFAULT_COVER_PROMPT }
 $('artOpen').onclick = () => $('artFile').click()
 $('artFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return

@@ -18,13 +18,12 @@
         <button id="btnWysiwyg" class="mode-btn" type="button" title="Visual (WYSIWYG) editing">✨ WYSIWYG</button>
         <button id="btnAdvanced" class="mode-btn" type="button" title="Advanced: edit the raw Markdown source">⚙ Advanced (MD source)</button>
       </span>
-      <button id="btnCover" class="ghost" type="button" title="Generate a cover image with AI">🎨 Cover</button>
       <button id="btnSeq" class="ghost" type="button" title="Sequence animated clips into one looping cover">🎬 Sequence</button>
       <button id="btnTimeline" class="ghost" type="button" title="Build a scene-timeline music video cue synced to a song">🎞️ Music video</button>
       <button id="btnLyrics" class="ghost" type="button" title="Build a synced lyric (.lrc) timeline by tapping along to the song">🎤 Lyrics</button>
       <button id="btnFlac" class="ghost" type="button" title="Encode a WAV to lossless FLAC (max compression) for minting">🎚️ WAV→FLAC</button>
 <button id="btnTag" class="ghost" type="button" title="Embed cover art, lyrics and tags into a FLAC (in-app — no Kid3)">🏷️ Tags</button>
-      <button id="btnArt" class="ghost" type="button" title="Generate chapter art and insert it">🖼️ Art</button>
+      <button id="btnArt" class="ghost" type="button" title="Create art — book covers, chapter images, or 800×800 NFT art">🎨 Art</button>
       <button id="btnImport" class="ghost" type="button">Import</button>
       <button id="btnExport" class="ghost" type="button">Export draft</button>
       <button id="btnEpub" class="ghost" type="button" title="Export as an EPUB ebook">📚 EPUB</button>
@@ -135,45 +134,7 @@
     </div>
   </div>
 
-  <div id="coverModal" class="modal" hidden>
-    <div class="modal-box">
-      <div class="modal-head"><b>🎨 Book cover</b><button id="coverClose" class="ghost" type="button">✕</button></div>
-      <p class="dim" style="font-size:12px;margin:0 0 6px">Describe it simply — Claude writes the optimized image prompt, then nano-banana generates it. Edit the prompt if you like. (Claude = your subscription · images = fal.ai/FAL_API_KEY.)</p>
-      <label class="dim" style="font-size:12px">Describe the cover</label>
-      <input id="coverDesc" class="title-in" style="width:100%; margin-bottom:6px" placeholder="e.g. floating NFTs of books, music and art; warm gold glow; with the title and tagline" />
-      <div class="row" style="margin:0 0 10px; gap:8px; align-items:center"><button id="coverOptimize" class="ai-btn" type="button">✨ Optimize prompt</button><span id="coverOptStatus" class="dim"></span></div>
-      <label class="dim" style="font-size:12px">Image prompt (edit freely)</label>
-      <textarea id="coverPrompt" class="cover-prompt" rows="6"></textarea>
-      <div class="row" style="margin-top:8px; align-items:center; gap:8px">
-        <button id="coverGen" class="ai-btn" type="button">Generate</button>
-        <select id="coverAspect" title="Cover shape">
-          <option value="2:3">📖 Portrait 2:3 (book)</option>
-          <option value="1:1">🎵 Square 1:1 (music)</option>
-        </select>
-        <button id="coverOpen" class="ghost" type="button">📂 Open image…</button>
-        <input id="coverFile" type="file" accept="image/*" hidden />
-        <span id="coverStatus" class="dim"></span>
-      </div>
-      <div id="coverResult" class="cover-result" hidden>
-        <img id="coverImg" alt="cover preview" />
-        <div class="cover-actions">
-          <button id="coverUse" class="ghost" type="button">Use as cover</button>
-          <button id="coverDownload" class="ghost" type="button">Download</button>
-        </div>
-        <label class="dim" style="font-size:12px; margin-top:10px; display:block">Refine THIS image (nano-banana edit — keeps the composition)</label>
-        <input id="coverEditInstr" class="title-in" style="width:100%" placeholder="e.g. add &quot;Tommy Telford&quot; in small text near the bottom" />
-        <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="coverEdit" class="ai-btn" type="button">✏️ Edit image</button><span id="coverEditStatus" class="dim"></span></div>
-
-        <label class="dim" style="font-size:12px; margin-top:14px; display:block">🎬 Animate THIS image → looping cover (fal image-to-video → animated WebP). Describe the motion; keep it subtle.</label>
-        <input id="coverAnimPrompt" class="title-in" style="width:100%" placeholder="e.g. gentle drifting mist, slow flicker of the streetlight, faint camera drift" />
-        <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="coverAnimate" class="ai-btn" type="button">🎬 Animate</button><span id="coverAnimStatus" class="dim"></span></div>
-        <div id="coverAnimResult" hidden style="margin-top:8px">
-          <img id="coverAnimImg" alt="animated cover preview" style="max-width:100%; border-radius:6px" />
-          <div class="cover-actions" style="margin-top:6px"><button id="coverAnimDownload" class="ghost" type="button">Download animation</button></div>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- (Book-cover modal removed — merged into the single #artModal “Art” tool below.) -->
 
   <div id="seqModal" class="modal" hidden>
     <div class="modal-box" style="max-width:540px">
@@ -343,25 +304,34 @@
 
   <div id="artModal" class="modal" hidden>
     <div class="modal-box">
-      <div class="modal-head"><b>🖼️ Chapter art</b><button id="artClose" class="ghost" type="button">✕</button></div>
-      <p class="dim" style="font-size:12px;margin:0 0 6px">Describe it simply — Claude writes the prompt, nano-banana generates it, and “Insert” drops it into the current chapter.</p>
+      <div class="modal-head"><b>🎨 Art</b><button id="artClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px;margin:0 0 6px">One tool for every image — book covers, chapter art, and 800×800 NFT art. Describe it, Claude writes the prompt, nano-banana generates it. (Claude = your subscription · images = fal.ai/FAL_API_KEY.)</p>
       <label class="dim" style="font-size:12px">House style — applied to every image (set once per book, for consistency)</label>
       <input id="artStyle" class="title-in" style="width:100%; margin:0 0 6px" placeholder="e.g. flat vector, warm gold on charcoal, soft glow, no text" />
-      <div class="row" style="margin:0 0 12px; gap:8px; align-items:center">
+      <div class="row" style="margin:0 0 10px; gap:8px; align-items:center">
         <select id="artStyleTemplate" class="project-select" title="Load a style template"></select>
         <span class="dim" style="font-size:12px">↤ load a template into the field</span>
       </div>
-      <label class="dim" style="font-size:12px">Describe the illustration</label>
-      <input id="artDesc" class="title-in" style="width:100%; margin-bottom:6px" placeholder="e.g. a clean flat infographic of a flywheel; or a friendly robot at a desk" />
+      <div class="row" style="margin:0 0 8px; gap:8px; align-items:center">
+        <label class="dim" style="font-size:12px">Purpose</label>
+        <select id="artPurpose" class="project-select" title="How Claude frames the prompt">
+          <option value="illustration">🖼️ Illustration / NFT art</option>
+          <option value="cover">📖 Book cover</option>
+        </select>
+      </div>
+      <label class="dim" style="font-size:12px">Describe the image</label>
+      <input id="artDesc" class="title-in" style="width:100%; margin-bottom:6px" placeholder="e.g. a friendly cartoon copywriter mascot; or a premium book cover with the title" />
       <div class="row" style="margin:0 0 10px; gap:8px; align-items:center"><button id="artOptimize" class="ai-btn" type="button">✨ Optimize prompt</button><span id="artOptStatus" class="dim"></span></div>
       <label class="dim" style="font-size:12px">Image prompt (edit freely)</label>
       <textarea id="artPrompt" class="cover-prompt" rows="5"></textarea>
       <div class="row" style="margin-top:8px; align-items:center; gap:8px">
         <button id="artGen" class="ai-btn" type="button">Generate</button>
         <select id="artAspect" class="project-select" title="Shape">
-          <option value="16:9">Landscape</option>
-          <option value="1:1">Square</option>
-          <option value="3:4">Portrait</option>
+          <option value="2:3">📖 Portrait 2:3 (book)</option>
+          <option value="3:4">Portrait 3:4</option>
+          <option value="1:1">Square 1:1</option>
+          <option value="1:1@800">🖼️ NFT square 800×800</option>
+          <option value="16:9">Landscape 16:9</option>
         </select>
         <button id="artOpen" class="ghost" type="button">📂 Open…</button>
         <input id="artFile" type="file" accept="image/*" hidden />
@@ -370,6 +340,7 @@
       <div id="artResult" class="cover-result" hidden>
         <img id="artImg" alt="art preview" />
         <div class="cover-actions">
+          <button id="artUseCover" class="ghost" type="button">Use as book cover</button>
           <button id="artInsert" class="ghost" type="button">Insert into chapter</button>
           <button id="artDownload" class="ghost" type="button">Download</button>
           <button id="artBanner" class="ghost" type="button" title="Crop to 1344×768 and download an optimized JPEG (OG / social banner size)">🖼️ Banner JPEG</button>
@@ -377,6 +348,14 @@
         <label class="dim" style="font-size:12px; margin-top:10px; display:block">Refine THIS image (keeps the composition)</label>
         <input id="artEditInstr" class="title-in" style="width:100%" placeholder="e.g. make the background lighter; keep everything else the same" />
         <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="artEdit" class="ai-btn" type="button">✏️ Edit image</button><span id="artEditStatus" class="dim"></span></div>
+
+        <label class="dim" style="font-size:12px; margin-top:14px; display:block">🎬 Animate THIS image → looping cover (fal image→video → animated WebP). Describe the motion; keep it subtle.</label>
+        <input id="artAnimPrompt" class="title-in" style="width:100%" placeholder="e.g. gentle drifting particles, slow glow flicker, faint camera drift" />
+        <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="artAnimate" class="ai-btn" type="button">🎬 Animate</button><span id="artAnimStatus" class="dim"></span></div>
+        <div id="artAnimResult" hidden style="margin-top:8px">
+          <img id="artAnimImg" alt="animated preview" style="max-width:100%; border-radius:6px" />
+          <div class="cover-actions" style="margin-top:6px"><button id="artAnimDownload" class="ghost" type="button">Download animation</button></div>
+        </div>
       </div>
     </div>
   </div>
