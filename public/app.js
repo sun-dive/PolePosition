@@ -1380,6 +1380,8 @@ function downloadArtAnim () {
 }
 // Motion presets + a Claude "suggest motion" — help write the animate prompt (subtle, loop-friendly).
 const ANIM_TEMPLATES = [
+  ['Character writes (text appears)', 'the character actively writes and the words appear stroke by stroke in the speech bubble / on the page as the pen moves; the rest of the scene stays still; seamless loop'],
+  ['Character in action', 'the character performs its main action in a small, natural, looping motion (e.g. writing, gesturing, tapping); keep the face and features stable; seamless loop'],
   ['Drifting light particles', 'gentle drifting light particles with a soft glow that slowly pulses; the subject stays still; seamless loop'],
   ['Soft camera drift', 'very subtle slow camera drift, a barely-perceptible Ken-Burns push-in; seamless loop'],
   ['Shimmer on highlights', 'a soft shimmer and slow twinkle across the highlights and edges; everything else still; seamless loop'],
