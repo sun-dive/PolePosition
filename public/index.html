@@ -352,6 +352,11 @@
 
         <label class="dim" style="font-size:12px; margin-top:14px; display:block">🎬 Animate THIS image → looping cover (fal image→video → animated WebP). Describe the motion; keep it subtle.</label>
         <input id="artAnimPrompt" class="title-in" style="width:100%" placeholder="e.g. gentle drifting particles, slow glow flicker, faint camera drift" />
+        <div class="row" style="margin-top:6px; gap:8px; align-items:center; flex-wrap:wrap">
+          <select id="artAnimTemplate" class="project-select" title="Load a motion preset"></select>
+          <button id="artAnimSuggest" class="ai-btn" type="button" title="Claude suggests subtle motion tailored to this image">✨ Suggest motion</button>
+          <span id="artAnimSuggestStatus" class="dim"></span>
+        </div>
         <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="artAnimate" class="ai-btn" type="button">🎬 Animate</button><span id="artAnimStatus" class="dim"></span></div>
         <div id="artAnimResult" hidden style="margin-top:8px">
           <img id="artAnimImg" alt="animated preview" style="max-width:100%; border-radius:6px" />

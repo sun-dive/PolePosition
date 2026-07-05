@@ -46,6 +46,7 @@ const FAL_VIDEO_MODEL = process.env.FAL_VIDEO_MODEL || 'fal-ai/veo2/image-to-vid
 const SYSTEM = 'You are a skilled co-author helping write an ebook. Write engaging, clear prose that matches the existing tone and style. Output ONLY the requested content as Markdown — no preamble, no explanations, no meta-commentary, no surrounding quotes.'
 
 const IMG_PROMPT_SYSTEM = 'You are an expert prompt engineer for the fal.ai nano-banana (Google Gemini) text-to-image model, specializing in premium ebook covers and book illustrations. Given a short description, write ONE vivid, well-structured image prompt (3–6 sentences) covering subject and composition, art style, lighting, colour palette, and mood. For any words that must appear in the image, quote the EXACT text in double quotes and call for crisp, legible, well-kerned lettering. Aim for professional, marketable results. Output ONLY the final prompt — no preamble, no surrounding quotes, no commentary.'
+const ANIM_PROMPT_SYSTEM = 'You write MOTION prompts for an image-to-video model that animates a STILL image into a SHORT, SEAMLESS LOOP for an eye-catching NFT. Given a description of the image, suggest gentle, tasteful motion that loops cleanly — drifting light particles, a soft glow that slowly pulses, faint camera drift, subtle shimmer on highlights, slow ambient background movement. Keep the motion SUBTLE and clearly loopable; the main subject should stay mostly still. AVOID distorting faces, hands, eyes, or text; avoid large, fast, or jarring movement. Write one or two sentences describing ONLY the motion. Output ONLY the motion prompt — no preamble, no quotes, no commentary.'
 
 // Book Factory (stage 1: fast drafting). An outline architect + a chapter ghostwriter, both on the
 // subscription via generate(). The `brief` is the seam a future niche-research step will fill in.
@@ -332,7 +333,10 @@ const server = createServer(async (req, res) => {
     try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
     if (!body.description || !String(body.description).trim()) return sendJson(res, 400, { error: 'Describe the image first.' })
     try {
-      const prompt = await optimizeImagePrompt(String(body.description).trim(), body.kind === 'cover' ? 'cover' : 'inline', typeof body.style === 'string' ? body.style.trim() : '', typeof body.aspect === 'string' ? body.aspect : '')
+      const desc = String(body.description).trim()
+      const prompt = body.kind === 'motion'
+        ? await generate(`Write a subtle, seamless-loop motion prompt for this image:\n\n"""${desc}"""`, ANIM_PROMPT_SYSTEM)
+        : await optimizeImagePrompt(desc, body.kind === 'cover' ? 'cover' : 'inline', typeof body.style === 'string' ? body.style.trim() : '', typeof body.aspect === 'string' ? body.aspect : '')
       if (!prompt) return sendJson(res, 502, { error: 'No prompt returned — try again.' })
       return sendJson(res, 200, { prompt })
     } catch (e) {

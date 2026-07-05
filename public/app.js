@@ -1378,6 +1378,33 @@ function downloadArtAnim () {
   const a = document.createElement('a'); a.href = artAnimData
   a.download = (book.title || 'art').replace(/[^\w.-]+/g, '_') + '-animated.' + ext; a.click()
 }
+// Motion presets + a Claude "suggest motion" — help write the animate prompt (subtle, loop-friendly).
+const ANIM_TEMPLATES = [
+  ['Drifting light particles', 'gentle drifting light particles with a soft glow that slowly pulses; the subject stays still; seamless loop'],
+  ['Soft camera drift', 'very subtle slow camera drift, a barely-perceptible Ken-Burns push-in; seamless loop'],
+  ['Shimmer on highlights', 'a soft shimmer and slow twinkle across the highlights and edges; everything else still; seamless loop'],
+  ['Ambient glow pulse', 'a soft ambient glow that gently brightens and dims in a slow rhythm; seamless loop'],
+  ['Floating dust / embers', 'faint floating dust motes and slow-rising embers drifting upward; subtle; seamless loop'],
+  ['Energy particles rising', 'soft flowing energy and data particles drifting slowly upward behind the subject; seamless loop'],
+  ['Mascot idle', 'very subtle idle motion — a slow gentle sway and a soft blink, with tiny background particle drift; keep the face and features stable; seamless loop'],
+  ['Background parallax', 'gentle background parallax drift while the subject stays perfectly still; subtle; seamless loop']
+]
+function initAnimTemplates () {
+  const sel = $('artAnimTemplate'); sel.innerHTML = '<option value="">— motion preset —</option>'
+  ANIM_TEMPLATES.forEach(([name, motion]) => { const o = document.createElement('option'); o.value = motion; o.textContent = name; sel.appendChild(o) })
+}
+async function suggestMotion () {
+  const desc = $('artPrompt').value.trim() || $('artDesc').value.trim()
+  if (!desc) { $('artAnimSuggestStatus').textContent = 'Generate or describe an image first.'; return }
+  $('artAnimSuggest').disabled = true; $('artAnimSuggestStatus').textContent = 'Claude is suggesting motion…'
+  try {
+    const r = await fetch('/api/image-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description: desc, kind: 'motion' }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('artAnimSuggestStatus').textContent = data.error || ('Error ' + r.status); return }
+    $('artAnimPrompt').value = (data.prompt || '').trim(); $('artAnimSuggestStatus').textContent = 'Motion ready — tweak it or Animate.'
+  } catch (e) { $('artAnimSuggestStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('artAnimSuggest').disabled = false }
+}
 $('btnArt').onclick = openArt
 $('artClose').onclick = closeArt
 $('artModal').addEventListener('click', e => { if (e.target === $('artModal')) closeArt() })
@@ -1390,6 +1417,8 @@ $('artDownload').onclick = downloadArt
 $('artBanner').onclick = downloadBannerJpeg
 $('artAnimate').onclick = animateArt
 $('artAnimDownload').onclick = downloadArtAnim
+$('artAnimSuggest').onclick = suggestMotion
+$('artAnimTemplate').onchange = e => { if (e.target.value) $('artAnimPrompt').value = e.target.value; e.target.value = '' }
 $('artPurpose').onchange = e => { if (e.target.value === 'cover' && !$('artPrompt').value.trim()) $('artPrompt').value = DEFAULT_COVER_PROMPT }
 $('artOpen').onclick = () => $('artFile').click()
 $('artFile').onchange = e => {
@@ -1401,6 +1430,7 @@ $('artFile').onchange = e => {
 $('artStyle').oninput = e => { book.artStyle = e.target.value; save() }
 $('artStyleTemplate').onchange = e => { if (e.target.value) { $('artStyle').value = e.target.value; book.artStyle = e.target.value; save() } e.target.value = '' }
 initArtTemplates()
+initAnimTemplates()
 
 renderProjects()
 renderChapters(); renderEditor()
