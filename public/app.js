@@ -1420,7 +1420,7 @@ $('artBanner').onclick = downloadBannerJpeg
 $('artAnimate').onclick = animateArt
 $('artAnimDownload').onclick = downloadArtAnim
 $('artAnimSuggest').onclick = suggestMotion
-$('artAnimTemplate').onchange = e => { if (e.target.value) $('artAnimPrompt').value = e.target.value; e.target.value = '' }
+$('artAnimTemplate').onchange = e => { if (e.target.value) $('artAnimPrompt').value = e.target.value } // sticky: keep the chosen preset shown
 $('artPurpose').onchange = e => { if (e.target.value === 'cover' && !$('artPrompt').value.trim()) $('artPrompt').value = DEFAULT_COVER_PROMPT }
 $('artOpen').onclick = () => $('artFile').click()
 $('artFile').onchange = e => {
