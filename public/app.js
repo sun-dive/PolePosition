@@ -1196,6 +1196,7 @@ $('tagFlac').onchange = async () => {
   tagFlacFile = $('tagFlac').files[0] || null; tagFlacBuf = null
   resetTagEditor() // clear stale/default values so the loaded file's own tags show through
   $('tagFlacName').textContent = tagFlacFile ? tagFlacFile.name : ''
+  $('tagWrite').textContent = '💾 Write tags → ' + (tagFlacFile && isMp3File(tagFlacFile) ? 'MP3' : 'FLAC')
   $('tagStatus').textContent = ''
   if (!tagFlacFile) return
   $('tagStatus').textContent = 'Reading existing tags…'
