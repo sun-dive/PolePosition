@@ -1096,7 +1096,7 @@ function parseMp3Meta (arrayBuffer) {
   const ver = u8[3] // 3 = v2.3, 4 = v2.4
   if (ver < 3) return out // v2.2 (3-char frame ids) unsupported
   const synch = (a, b, c, d) => (a << 21) | (b << 14) | (c << 7) | d
-  const strip0 = s => s.replace(/\s+$/, '')
+  const strip0 = s => s.replace(/[\s\u0000]+$/, '') // trailing whitespace + stray NUL terminators
   const decodeText = bytes => {
     if (!bytes.length) return ''
     const enc = bytes[0], body = bytes.subarray(1)
@@ -1136,6 +1136,14 @@ function parseMp3Meta (arrayBuffer) {
     } else if (id === 'COMM') {
       const enc = data[0]; const p = afterDesc(data, 4, enc)
       if (!out.tags.COMMENT) out.tags.COMMENT = decodeText(new Uint8Array([enc, ...data.subarray(p)]))
+    } else if (id === 'TXXX') {
+      // User-defined text: [enc][description NUL][value]. ffmpeg stores `comment` HERE, not in a COMM frame.
+      const enc = data[0]; let p = 1; const dStart = p
+      if (enc === 1 || enc === 2) { while (p + 1 < data.length && !(data[p] === 0 && data[p + 1] === 0)) p += 2 } else { while (p < data.length && data[p] !== 0) p++ }
+      const desc = decodeText(new Uint8Array([enc, ...data.subarray(dStart, p)])).trim().toUpperCase()
+      const vStart = (enc === 1 || enc === 2) ? p + 2 : p + 1
+      const val = decodeText(new Uint8Array([enc, ...data.subarray(vStart)]))
+      if (val && (desc === 'COMMENT' || desc === 'DESCRIPTION') && !out.tags.COMMENT) out.tags.COMMENT = val
     } else if (id[0] === 'T' && TMAP[id]) {
       const val = decodeText(data)
       if (val && !out.tags[TMAP[id]]) out.tags[TMAP[id]] = val
