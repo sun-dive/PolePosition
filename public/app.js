@@ -1154,7 +1154,7 @@ function parseAudioMeta (arrayBuffer) {
 function isMp3File (file) { return /\.mp3$/i.test(file?.name || '') || file?.type === 'audio/mpeg' }
 
 function resetTagEditor () { // each file load starts clean — nothing stale/default carries over to block it
-  for (const id of ['tagTitle', 'tagArtist', 'tagAlbum', 'tagYear', 'tagTrack', 'tagGenre', 'tagCopyright', 'tagLyrics']) $(id).value = ''
+  for (const id of ['tagTitle', 'tagArtist', 'tagAlbum', 'tagYear', 'tagTrack', 'tagGenre', 'tagCopyright', 'tagComment', 'tagLyrics']) $(id).value = ''
   tagArt.front = tagArt.back = tagArt.media = null
   for (const [imgId, xId] of [['tagArtFrontImg', 'tagArtFrontX'], ['tagArtBackImg', 'tagArtBackX'], ['tagArtMediaImg', 'tagArtMediaX']]) {
     $(imgId).hidden = true; $(imgId).removeAttribute('src'); $(xId).hidden = true
@@ -1164,7 +1164,7 @@ function prefillFromMeta (meta) {
   const set = (id, v) => { if (v) $(id).value = v } // the loaded file wins — show exactly what's embedded
   set('tagTitle', meta.tags.TITLE); set('tagArtist', meta.tags.ARTIST); set('tagAlbum', meta.tags.ALBUM)
   set('tagYear', meta.tags.DATE || meta.tags.YEAR); set('tagTrack', meta.tags.TRACKNUMBER || meta.tags.TRACK)
-  set('tagGenre', meta.tags.GENRE); set('tagCopyright', meta.tags.COPYRIGHT)
+  set('tagGenre', meta.tags.GENRE); set('tagCopyright', meta.tags.COPYRIGHT); set('tagComment', meta.tags.COMMENT)
   if (meta.lyrics) $('tagLyrics').value = meta.lyrics
   const slots = { front: ['tagArtFrontImg', 'tagArtFrontX'], back: ['tagArtBackImg', 'tagArtBackX'], media: ['tagArtMediaImg', 'tagArtMediaX'] }
   for (const p of meta.pictures) {
@@ -1250,7 +1250,7 @@ $('tagWrite').onclick = async () => {
     const tags = {
       TITLE: $('tagTitle').value.trim(), ARTIST: $('tagArtist').value.trim(), ALBUM: $('tagAlbum').value.trim(),
       DATE: $('tagYear').value.trim(), TRACKNUMBER: $('tagTrack').value.trim(), GENRE: $('tagGenre').value.trim(),
-      COPYRIGHT: $('tagCopyright').value.trim(),
+      COPYRIGHT: $('tagCopyright').value.trim(), COMMENT: $('tagComment').value.trim(),
     }
     const pictures = []
     if (tagArt.front) pictures.push({ type: 3, ...tagArt.front })
