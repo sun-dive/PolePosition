@@ -229,11 +229,16 @@
 
   <div id="tagModal" class="modal" hidden>
     <div class="modal-box" style="max-width:560px">
-      <div class="modal-head"><b>🏷️ Tag editor — embed into FLAC</b><button id="tagClose" class="ghost" type="button">✕</button></div>
-      <p class="dim" style="font-size:12px; margin:0 0 10px">Embed cover art (by role), lyrics and metadata straight into a FLAC — no Kid3. Then mint it in PharLap; the player reads the front/media art and the synced lyrics.</p>
+      <div class="modal-head"><b>🏷️ Tag editor — embed into FLAC / MP3</b><button id="tagClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 10px">Embed cover art (by role), lyrics and metadata straight into a FLAC or MP3 — no Kid3. Then mint it in PharLap; the player reads the front/media art and the synced lyrics.</p>
       <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px">
-        <label class="ghost" style="cursor:pointer">📂 Load FLAC<input id="tagFlac" type="file" accept=".flac,audio/flac,audio/x-flac" hidden></label>
+        <label class="ghost" style="cursor:pointer">📂 Load FLAC / MP3<input id="tagFlac" type="file" accept=".flac,.mp3,audio/flac,audio/x-flac,audio/mpeg" hidden></label>
         <span id="tagFlacName" class="dim" style="font-size:12px"></span>
+      </div>
+      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px">
+        <label class="ghost" style="cursor:pointer">📋 Copy tags from a file<input id="tagCopySrc" type="file" accept=".flac,.mp3,audio/flac,audio/x-flac,audio/mpeg" hidden></label>
+        <button id="tagPaste" class="ghost" type="button" disabled>📥 Paste tags</button>
+        <span id="tagCopyName" class="dim" style="font-size:12px"></span>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px">
         <label style="display:flex; flex-direction:column; gap:3px; font-size:12px">Title<input id="tagTitle" type="text"></label>

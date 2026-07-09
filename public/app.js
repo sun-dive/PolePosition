@@ -1085,6 +1085,74 @@ function parseFlacMeta (arrayBuffer) {
   }
   return out
 }
+
+// Read an MP3's ID3v2 (v2.3/v2.4) tags client-side — SAME {tags, lyrics, pictures} shape as parseFlacMeta,
+// so prefillFromMeta works unchanged. Maps TIT2→TITLE, TPE1→ARTIST, TALB→ALBUM, TYER/TDRC→DATE, TRCK→TRACKNUMBER,
+// TCON→GENRE, TCOP→COPYRIGHT, COMM→COMMENT; APIC→pictures (type 3/4/6); USLT→lyrics.
+function parseMp3Meta (arrayBuffer) {
+  const u8 = new Uint8Array(arrayBuffer), dv = new DataView(arrayBuffer)
+  const out = { tags: {}, lyrics: '', pictures: [] }
+  if (u8.length < 10 || u8[0] !== 0x49 || u8[1] !== 0x44 || u8[2] !== 0x33) return out // "ID3"
+  const ver = u8[3] // 3 = v2.3, 4 = v2.4
+  if (ver < 3) return out // v2.2 (3-char frame ids) unsupported
+  const synch = (a, b, c, d) => (a << 21) | (b << 14) | (c << 7) | d
+  const strip0 = s => s.replace(/\s+$/, '')
+  const decodeText = bytes => {
+    if (!bytes.length) return ''
+    const enc = bytes[0], body = bytes.subarray(1)
+    try {
+      if (enc === 1) return strip0(new TextDecoder('utf-16').decode(body))
+      if (enc === 2) return strip0(new TextDecoder('utf-16be').decode(body))
+      if (enc === 3) return strip0(new TextDecoder('utf-8').decode(body))
+      return strip0(new TextDecoder('iso-8859-1').decode(body))
+    } catch { return strip0(new TextDecoder().decode(body)) }
+  }
+  // advance past a null-terminated descriptor (double-null for UTF-16 encodings), return the new offset
+  const afterDesc = (data, p, enc) => {
+    if (enc === 1 || enc === 2) { while (p + 1 < data.length && !(data[p] === 0 && data[p + 1] === 0)) p += 2; return p + 2 }
+    while (p < data.length && data[p] !== 0) p++; return p + 1
+  }
+  const TMAP = { TIT2: 'TITLE', TPE1: 'ARTIST', TALB: 'ALBUM', TYER: 'DATE', TDRC: 'DATE', TRCK: 'TRACKNUMBER', TCON: 'GENRE', TCOP: 'COPYRIGHT', TPE2: 'ALBUMARTIST' }
+  const end = Math.min(u8.length, 10 + synch(u8[6], u8[7], u8[8], u8[9]))
+  let pos = 10
+  while (pos + 10 <= end) {
+    const id = String.fromCharCode(u8[pos], u8[pos + 1], u8[pos + 2], u8[pos + 3])
+    if (!/^[A-Z0-9]{4}$/.test(id)) break // padding / end of frames
+    const size = ver === 4 ? synch(u8[pos + 4], u8[pos + 5], u8[pos + 6], u8[pos + 7]) : dv.getUint32(pos + 4)
+    const fbody = pos + 10
+    if (size <= 0 || fbody + size > end) break
+    const data = u8.subarray(fbody, fbody + size)
+    if (id === 'APIC') {
+      const enc = data[0]; let p = 1
+      let me = p; while (me < data.length && data[me] !== 0) me++
+      const mime = new TextDecoder('iso-8859-1').decode(data.subarray(p, me)); p = me + 1
+      const picType = data[p]; p += 1
+      p = afterDesc(data, p, enc)
+      out.pictures.push({ type: picType, mime: mime || 'image/jpeg', width: 0, height: 0, bytes: data.slice(p) })
+    } else if (id === 'USLT') {
+      const enc = data[0]; const p = afterDesc(data, 4, enc)
+      const text = decodeText(new Uint8Array([enc, ...data.subarray(p)]))
+      if (!out.lyrics) out.lyrics = text
+    } else if (id === 'COMM') {
+      const enc = data[0]; const p = afterDesc(data, 4, enc)
+      if (!out.tags.COMMENT) out.tags.COMMENT = decodeText(new Uint8Array([enc, ...data.subarray(p)]))
+    } else if (id[0] === 'T' && TMAP[id]) {
+      const val = decodeText(data)
+      if (val && !out.tags[TMAP[id]]) out.tags[TMAP[id]] = val
+    }
+    pos = fbody + size
+  }
+  return out
+}
+
+// Pick the right reader by magic bytes: "ID3" or an MPEG frame sync → MP3, else FLAC.
+function parseAudioMeta (arrayBuffer) {
+  const u8 = new Uint8Array(arrayBuffer)
+  const isMp3 = (u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) || (u8[0] === 0xff && (u8[1] & 0xe0) === 0xe0)
+  return isMp3 ? parseMp3Meta(arrayBuffer) : parseFlacMeta(arrayBuffer)
+}
+function isMp3File (file) { return /\.mp3$/i.test(file?.name || '') || file?.type === 'audio/mpeg' }
+
 function resetTagEditor () { // each file load starts clean — nothing stale/default carries over to block it
   for (const id of ['tagTitle', 'tagArtist', 'tagAlbum', 'tagYear', 'tagTrack', 'tagGenre', 'tagCopyright', 'tagLyrics']) $(id).value = ''
   tagArt.front = tagArt.back = tagArt.media = null
@@ -1133,12 +1201,30 @@ $('tagFlac').onchange = async () => {
   $('tagStatus').textContent = 'Reading existing tags…'
   try {
     tagFlacBuf = await tagFlacFile.arrayBuffer() // cached — reused when writing, so no second read
-    prefillFromMeta(parseFlacMeta(tagFlacBuf))
+    prefillFromMeta(parseAudioMeta(tagFlacBuf)) // FLAC (Vorbis) or MP3 (ID3v2) — chosen by magic bytes
     $('tagStatus').textContent = 'Loaded — existing art / lyrics / tags shown below (edit, then Write or Preview).'
   } catch (e) { $('tagStatus').textContent = 'Loaded (couldn’t read existing tags: ' + e.message + ')' }
   // fallbacks only for what the file didn't carry (never overrides an embedded value)
-  if (!$('tagTitle').value) $('tagTitle').value = tagFlacFile.name.replace(/\.flac$/i, '').replace(/_+/g, ' ')
+  if (!$('tagTitle').value) $('tagTitle').value = tagFlacFile.name.replace(/\.(flac|mp3)$/i, '').replace(/_+/g, ' ')
   if (!$('tagCopyright').value) $('tagCopyright').value = '© ' + new Date().getFullYear() + ' sun-dive'
+}
+// Copy-tags: read another track's tags/art/lyrics into a clipboard, then paste them onto the loaded sample.
+let copiedMeta = null
+$('tagCopySrc').onchange = async () => {
+  const f = $('tagCopySrc').files[0]; if (!f) return
+  $('tagCopyName').textContent = 'Reading ' + f.name + '…'
+  try {
+    copiedMeta = parseAudioMeta(await f.arrayBuffer()) // FLAC or MP3 — same {tags, lyrics, pictures} shape
+    const n = Object.values(copiedMeta.tags).filter(Boolean).length + copiedMeta.pictures.length + (copiedMeta.lyrics ? 1 : 0)
+    $('tagPaste').disabled = n === 0
+    $('tagCopyName').textContent = n ? `Copied ${n} field(s) from ${f.name} — load your sample above, then Paste tags.` : `No tags found in ${f.name}.`
+  } catch (e) { copiedMeta = null; $('tagPaste').disabled = true; $('tagCopyName').textContent = 'Couldn’t read tags: ' + e.message }
+  $('tagCopySrc').value = '' // allow re-selecting the same file
+}
+$('tagPaste').onclick = () => {
+  if (!copiedMeta) return
+  prefillFromMeta(copiedMeta) // applies every non-empty copied tag/art/lyric over the current fields
+  $('tagStatus').textContent = 'Pasted copied tags — review, then Write or Preview.'
 }
 function wireArtSlot (role, inputId, imgId, xId) {
   $(inputId).onchange = async () => {
@@ -1155,10 +1241,11 @@ wireArtSlot('back', 'tagArtBack', 'tagArtBackImg', 'tagArtBackX')
 wireArtSlot('media', 'tagArtMedia', 'tagArtMediaImg', 'tagArtMediaX')
 $('tagLrc').onchange = async () => { const f = $('tagLrc').files[0]; if (f) $('tagLyrics').value = await f.text() }
 $('tagWrite').onclick = async () => {
-  if (!tagFlacFile) { $('tagStatus').textContent = 'Load a FLAC first.'; return }
-  $('tagWrite').disabled = true; $('tagStatus').textContent = 'Reading FLAC…'
+  if (!tagFlacFile) { $('tagStatus').textContent = 'Load a FLAC or MP3 first.'; return }
+  const fmt = isMp3File(tagFlacFile) ? 'mp3' : 'flac'
+  $('tagWrite').disabled = true; $('tagStatus').textContent = 'Reading audio…'
   try {
-    const flacBytes = new Uint8Array(tagFlacBuf || await tagFlacFile.arrayBuffer())
+    const audioBytes = new Uint8Array(tagFlacBuf || await tagFlacFile.arrayBuffer())
     const tags = {
       TITLE: $('tagTitle').value.trim(), ARTIST: $('tagArtist').value.trim(), ALBUM: $('tagAlbum').value.trim(),
       DATE: $('tagYear').value.trim(), TRACKNUMBER: $('tagTrack').value.trim(), GENRE: $('tagGenre').value.trim(),
@@ -1169,12 +1256,12 @@ $('tagWrite').onclick = async () => {
     if (tagArt.back) pictures.push({ type: 4, ...tagArt.back })
     if (tagArt.media) pictures.push({ type: 6, ...tagArt.media })
     $('tagStatus').textContent = 'Embedding tags… (large files take a moment)'
-    const job = { flac: bytesToBase64(flacBytes), tags, lyrics: $('tagLyrics').value, pictures }
+    const job = { format: fmt, audio: bytesToBase64(audioBytes), tags, lyrics: $('tagLyrics').value, pictures }
     const r = await fetch('/api/tag', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(job) })
     if (!r.ok) { const d = await r.json().catch(() => ({})); $('tagStatus').textContent = d.error || ('Error ' + r.status); return }
     const blob = await r.blob()
-    triggerDownload(blob, tagFlacFile.name.replace(/\.flac$/i, '') + '-tagged.flac')
-    $('tagStatus').textContent = `Done — tagged FLAC downloaded (${(blob.size / 1048576).toFixed(1)} MB). Ready to mint in PharLap.`
+    triggerDownload(blob, tagFlacFile.name.replace(/\.(flac|mp3)$/i, '') + '-tagged.' + fmt)
+    $('tagStatus').textContent = `Done — tagged ${fmt.toUpperCase()} downloaded (${(blob.size / 1048576).toFixed(1)} MB). Ready to mint in PharLap.`
   } catch (e) { $('tagStatus').textContent = 'Failed — is the server running? ' + e.message }
   finally { $('tagWrite').disabled = false }
 }
@@ -1215,7 +1302,7 @@ function setPvMode (mode) {
   img.style.borderRadius = spin ? '50%' : '10px'
 }
 function openPreview () {
-  if (!tagFlacFile) { $('tagStatus').textContent = 'Load a FLAC first.'; return }
+  if (!tagFlacFile) { $('tagStatus').textContent = 'Load a FLAC or MP3 first.'; return }
   if (pvAudioUrl) URL.revokeObjectURL(pvAudioUrl)
   pvAudioUrl = URL.createObjectURL(tagFlacFile); $('pvAudio').src = pvAudioUrl
   $('pvMeta').textContent = [$('tagTitle').value.trim(), $('tagArtist').value.trim()].filter(Boolean).join(' — ')

@@ -448,19 +448,21 @@ const server = createServer(async (req, res) => {
     }
   }
 
-  // ── Tag a FLAC (in-app Kid3): text tags + cover art by role (front/back/media) + lyrics, via metaflac ──
-  // Body (JSON): { flac:<base64>, tags:{TITLE,ARTIST,ALBUM,DATE,COPYRIGHT,TRACKNUMBER,GENRE,…},
+  // ── Tag a FLAC (metaflac) or MP3 (ffmpeg/ID3): text tags + cover art + lyrics ──
+  // Body (JSON): { audio:<base64>, format:'flac'|'mp3', tags:{TITLE,ARTIST,ALBUM,DATE,COPYRIGHT,TRACKNUMBER,GENRE,COMMENT,…},
   //                lyrics:"<lrc/plain>", pictures:[{type:3|4|6, mime, width?, height?, data:<base64>}] }
+  // FLAC = metaflac (cover art by role front/back/media + LYRICS tag). MP3 = ffmpeg ID3 (text tags + FRONT cover
+  // APIC + best-effort lyrics; back/media roles are FLAC-only). `flac` is still accepted for the old key.
   if (url.pathname === '/api/tag' && req.method === 'POST') {
     const stamp = Date.now() + '-' + Math.random().toString(36).slice(2, 8)
-    const flacPath = join(tmpdir(), 'pp-tag-' + stamp + '.flac')
-    const tmp = [] // extra temp files (lyrics + pictures) to clean up
+    const tmp = [] // temp files to clean up
     try {
       const raw = await readRawBody(req, 800 * 1024 * 1024)
       let job
       try { job = JSON.parse(raw.toString('utf8')) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
-      if (!job || typeof job.flac !== 'string' || !job.flac) return sendJson(res, 400, { error: 'no FLAC provided' })
-      await writeFile(flacPath, Buffer.from(job.flac, 'base64'))
+      const audioB64 = typeof job.audio === 'string' && job.audio ? job.audio : (typeof job.flac === 'string' ? job.flac : '')
+      if (!audioB64) return sendJson(res, 400, { error: 'no audio provided' })
+      const isMp3 = String(job.format || '').toLowerCase() === 'mp3'
 
       const tags = (job.tags && typeof job.tags === 'object') ? job.tags : {}
       const clean = Object.entries(tags)
@@ -468,15 +470,48 @@ const server = createServer(async (req, res) => {
         .filter(([k, v]) => k && v != null && String(v).trim() !== '')
       const hasLyrics = typeof job.lyrics === 'string' && job.lyrics.trim() !== ''
       const pics = Array.isArray(job.pictures) ? job.pictures.filter(p => p && typeof p.data === 'string' && p.data) : []
+      if (!clean.length && !hasLyrics && !pics.length) return sendJson(res, 400, { error: 'nothing to write — add text tags, cover art, or lyrics' })
 
-      // Pass 1 — remove what we're about to (re)write, so re-tagging never duplicates (leaves other tags intact).
+      if (isMp3) {
+        // ── MP3 / ID3 via ffmpeg: text tags + FRONT cover (APIC) + best-effort lyrics ──
+        const inPath = join(tmpdir(), 'pp-tag-' + stamp + '.mp3'); tmp.push(inPath)
+        const outPath = join(tmpdir(), 'pp-tag-' + stamp + '-out.mp3'); tmp.push(outPath)
+        await writeFile(inPath, Buffer.from(audioB64, 'base64'))
+        const front = pics.find(p => Number(p.type) === 3) || pics[0] || null // ID3 APIC = one front cover
+        let coverPath = null
+        if (front) {
+          const mime = (typeof front.mime === 'string' && front.mime.startsWith('image/')) ? front.mime : 'image/jpeg'
+          const ext = mime.split('/')[1].replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'jpg'
+          coverPath = join(tmpdir(), 'pp-cov-' + stamp + '.' + ext); tmp.push(coverPath)
+          await writeFile(coverPath, Buffer.from(front.data, 'base64'))
+        }
+        // ffmpeg maps these generic keys to the right ID3 frames; unknown keys → lowercase (TXXX).
+        const ID3 = { TITLE: 'title', ARTIST: 'artist', ALBUM: 'album', ALBUMARTIST: 'album_artist', DATE: 'date', YEAR: 'date', TRACKNUMBER: 'track', TRACK: 'track', GENRE: 'genre', COPYRIGHT: 'copyright', COMMENT: 'comment' }
+        const args = ['-y', '-i', inPath]
+        if (coverPath) args.push('-i', coverPath)
+        args.push('-map', '0:a')
+        if (coverPath) args.push('-map', '1:v', '-disposition:v', 'attached_pic', '-metadata:s:v', 'title=Cover', '-metadata:s:v', 'comment=Cover (front)')
+        else args.push('-map', '0:v?') // no new cover — keep the input's existing embedded cover if it has one
+        args.push('-c', 'copy', '-id3v2_version', '3')
+        for (const [k, v] of clean) args.push('-metadata', (ID3[k] || k.toLowerCase()) + '=' + String(v))
+        if (hasLyrics) args.push('-metadata', 'lyrics=' + String(job.lyrics)) // best-effort USLT
+        args.push(outPath)
+        await runFfmpeg(args)
+        const out = await readFile(outPath)
+        res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-disposition': 'attachment; filename="tagged.mp3"', 'x-size': String(out.length) })
+        return res.end(out)
+      }
+
+      // ── FLAC via metaflac: text tags + cover art by role (front/back/media) + lyrics ──
+      const flacPath = join(tmpdir(), 'pp-tag-' + stamp + '.flac'); tmp.push(flacPath)
+      await writeFile(flacPath, Buffer.from(audioB64, 'base64'))
+      // Pass 1 — remove what we're about to (re)write so re-tagging never duplicates (leaves other tags intact).
       // metaflac forbids mixing "shorthand" ops (--remove-tag) with "major" ops (--remove) in one call → split.
       const rmTags = []
       for (const [k] of clean) rmTags.push('--remove-tag=' + k)
       if (hasLyrics) rmTags.push('--remove-tag=LYRICS')
       if (rmTags.length) await runCmd('metaflac', [...rmTags, flacPath])
       if (pics.length) await runCmd('metaflac', ['--remove', '--block-type=PICTURE', flacPath])
-
       // Pass 2 — write text tags, lyrics (from a temp file → multi-line safe), and pictures by type.
       const set = []
       for (const [k, v] of clean) set.push('--set-tag=' + k + '=' + String(v))
@@ -496,16 +531,13 @@ const server = createServer(async (req, res) => {
         // spec: TYPE|MIME|DESCRIPTION|WIDTHxHEIGHTxDEPTH|FILE  (metaflac reads it as a single arg via spawn)
         set.push('--import-picture-from=' + `${type}|${mime}||${w && h ? `${w}x${h}x24` : '0x0x0'}|${pp}`)
       }
-      if (!set.length) return sendJson(res, 400, { error: 'nothing to write — add text tags, cover art, or lyrics' })
       await runCmd('metaflac', [...set, flacPath])
-
       const out = await readFile(flacPath)
       res.writeHead(200, { 'content-type': 'audio/flac', 'content-disposition': 'attachment; filename="tagged.flac"', 'x-flac-size': String(out.length) })
       return res.end(out)
     } catch (e) {
       return sendJson(res, 502, { error: 'tagging failed: ' + (e.message || 'error') })
     } finally {
-      await unlink(flacPath).catch(() => {})
       await Promise.all(tmp.map(f => unlink(f).catch(() => {})))
     }
   }
