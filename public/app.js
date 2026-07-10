@@ -261,6 +261,7 @@ async function exportPdf () {
   $('btnPdf').disabled = true; flash('Preparing PDF (encoding images as JPEG)…')
   try {
   const css = `@page{margin:18mm}
+@page cover{margin:0}
 *{box-sizing:border-box}
 body{font:16px/1.6 Georgia,'Times New Roman',serif;color:#111;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 h1,h2,h3,h4{font-family:-apple-system,system-ui,'Segoe UI',Roboto,sans-serif;line-height:1.25;break-after:avoid;page-break-after:avoid;break-inside:avoid}
@@ -270,7 +271,7 @@ li{break-inside:avoid;page-break-inside:avoid}
 img{max-width:100%;height:auto;display:block;margin:1em auto;border-radius:6px;break-inside:avoid;page-break-inside:avoid}
 blockquote{break-inside:avoid;page-break-inside:avoid;border-left:3px solid #ccc;margin:1em 0;padding:.2em 1em;color:#555}
 a{color:#1a5fb4;text-decoration:none}hr{border:0;border-top:1px solid #ccc;margin:1.5em 0}
-.cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:96vh;margin:0 auto;border-radius:0}
+.cover{page:cover;margin:0;text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:100vh;margin:0 auto;border-radius:0}
 .chapter{page-break-before:always}`
   // PNG masters in public/art stay untouched; encode JPEG only into this PDF
   const refs = new Set()
