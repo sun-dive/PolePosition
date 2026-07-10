@@ -243,7 +243,7 @@ function drawBack (gold, bg) {
 function draw () {
   const gold = $('gold').value, bg = $('bg').value
   if (face === 'front') drawFront(gold, bg); else drawBack(gold, bg)
-  scheduleSize()
+  scheduleSize(); saveSoon()
 }
 function setFace (f) {
   face = f
@@ -257,6 +257,31 @@ function setFace (f) {
     ? 'Live preview — front cover: title top · image centre · author bottom.'
     : 'Live preview — back cover: blurb + top/bottom image.'
   draw()
+}
+
+// Light autosave — remember fields + settings across reloads (localStorage). The embedded image is saved too
+// when small enough to stay light; a large image isn't persisted (just re-drop the file).
+const SAVE_KEY = 'polepos:bookcover'
+const SAVE_IDS = ['fTitle','fSub','fAuthor','kicker','headline','body','bullets','closer','footer','gold','bg','imgPos','imgSize','fmt','quality']
+let saveTimer = null
+function saveState () {
+  try {
+    const st = { face, imgRound: $('imgRound').checked }
+    for (const id of SAVE_IDS) st[id] = $(id).value
+    if (embImg && embImg.src && embImg.src.length < 1_500_000) st.img = embImg.src // keep it light
+    localStorage.setItem(SAVE_KEY, JSON.stringify(st))
+  } catch (e) { /* storage full/disabled → best-effort, ignore */ }
+}
+function saveSoon () { clearTimeout(saveTimer); saveTimer = setTimeout(saveState, 500) }
+function loadState () {
+  let st; try { st = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null') } catch { st = null }
+  if (!st) return false
+  for (const id of SAVE_IDS) if (st[id] != null && $(id)) $(id).value = st[id]
+  if (typeof st.imgRound === 'boolean') $('imgRound').checked = st.imgRound
+  if (st.img) { const im = new Image(); im.onload = () => { embImg = im; draw() }; im.src = st.img }
+  $('qualityVal').textContent = $('quality').value + '%'
+  setFace(st.face || 'front')
+  return true
 }
 
 $('faceFront').onclick = () => setFace('front')
@@ -291,11 +316,11 @@ $('fmt').addEventListener('change', updateSize)
 $('quality').addEventListener('input', () => { $('qualityVal').textContent = $('quality').value + '%'; updateSize() })
 $('qualityVal').textContent = $('quality').value + '%'
 $('dl').onclick = () => { const { url, ext } = encode(); const a = document.createElement('a'); a.download = `book-cover-${face}.${ext}`; a.href = url; a.click() }
-$('reset').onclick = () => location.reload()
+$('reset').onclick = () => { try { localStorage.removeItem(SAVE_KEY) } catch (e) {} location.reload() }
 const presets = [['#e6b877','#0d1117'],['#f0c674','#0b0e13'],['#d9a441','#14100a'],['#7ee0c0','#0c1512'],['#ff7518','#140a04']]
 const sw = $('swatches')
 for (const [gd, bgc] of presets) { const d = document.createElement('div'); d.className='swatch'; d.style.background=`linear-gradient(135deg,${gd} 50%,${bgc} 50%)`; d.onclick=()=>{ $('gold').value=gd; $('bg').value=bgc; draw() }; sw.appendChild(d) }
-setFace('front')
+if (!loadState()) setFace('front') // restore the last session, else start on the front defaults
 </script>
 </body>
 </html>
