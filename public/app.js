@@ -1025,6 +1025,14 @@ let flacFile = null
 $('btnFlac').onclick = () => { $('flacModal').hidden = false }
 $('flacClose').onclick = () => { $('flacModal').hidden = true }
 $('flacModal').addEventListener('click', e => { if (e.target === $('flacModal')) $('flacModal').hidden = true })
+
+// 📖 Book Cover — the flat cover/back generator (backcover.html) in a modal iframe; lazy-loaded on first open.
+$('btnBookCover').onclick = () => {
+  const f = $('bookCoverFrame'); if (!f.dataset.loaded) { f.src = 'backcover.html'; f.dataset.loaded = '1' }
+  $('bookCoverModal').hidden = false
+}
+$('bookCoverClose').onclick = () => { $('bookCoverModal').hidden = true }
+$('bookCoverModal').addEventListener('click', e => { if (e.target === $('bookCoverModal')) $('bookCoverModal').hidden = true })
 $('flacInput').onchange = () => { flacFile = $('flacInput').files[0] || null; $('flacName').textContent = flacFile ? flacFile.name : ''; $('flacStatus').textContent = '' }
 $('flacEncode').onclick = async () => {
   if (!flacFile) { $('flacStatus').textContent = 'Choose a WAV first.'; return }

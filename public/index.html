@@ -24,6 +24,7 @@
       <button id="btnFlac" class="ghost" type="button" title="Encode a WAV to lossless FLAC (max compression) for minting">🎚️ WAV→FLAC</button>
 <button id="btnTag" class="ghost" type="button" title="Embed cover art, lyrics and tags into a FLAC or MP3 (in-app — no Kid3)">🏷️ Audio Tags</button>
       <button id="btnArt" class="ghost" type="button" title="Create art — book covers, chapter images, or 800×800 NFT art">🎨 Art</button>
+      <button id="btnBookCover" class="ghost" type="button" title="Design a flat book cover (front or back) with perfect text + optional image, to feed into the 3D render">📖 Book Cover</button>
       <button id="btnImport" class="ghost" type="button">Import</button>
       <button id="btnExport" class="ghost" type="button">Export draft</button>
       <button id="btnEpub" class="ghost" type="button" title="Export as an EPUB ebook">📚 EPUB</button>
@@ -224,6 +225,13 @@
         <button id="flacEncode" class="ai-btn" type="button">Encode to FLAC</button>
         <span id="flacStatus" class="dim" style="font-size:12px"></span>
       </div>
+    </div>
+  </div>
+
+  <div id="bookCoverModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:1120px; width:96vw; height:92vh; padding:0; overflow:hidden; display:flex; flex-direction:column">
+      <div class="modal-head" style="padding:10px 14px; flex:0 0 auto"><b>📖 Book Cover</b><button id="bookCoverClose" class="ghost" type="button">✕</button></div>
+      <iframe id="bookCoverFrame" title="Book cover generator" style="flex:1 1 auto; width:100%; border:0; background:#0b0e13"></iframe>
     </div>
   </div>
 
