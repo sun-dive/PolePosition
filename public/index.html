@@ -357,6 +357,7 @@
         <img id="artImg" alt="art preview" />
         <div class="cover-actions">
           <button id="artUseCover" class="ghost" type="button">Use as book cover</button>
+          <button id="artCrop" class="ghost" type="button" title="Align this image to an A4 (or other) crop frame">✂️ Crop</button>
           <button id="artInsert" class="ghost" type="button">Insert into chapter</button>
           <button id="artDownload" class="ghost" type="button">Download</button>
           <button id="artBanner" class="ghost" type="button" title="Crop to 1344×768 and download an optimized JPEG (OG / social banner size)">🖼️ Banner JPEG</button>
@@ -377,6 +378,31 @@
           <img id="artAnimImg" alt="animated preview" style="max-width:100%; border-radius:6px" />
           <div class="cover-actions" style="margin-top:6px"><button id="artAnimDownload" class="ghost" type="button">Download animation</button></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="cropModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:700px">
+      <div class="modal-head"><b>✂️ Crop</b><button id="cropClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 8px">Drag the image to position it; slider to zoom. The bright frame is what's kept.</p>
+      <div class="row" style="gap:10px; align-items:center; margin-bottom:8px; flex-wrap:wrap">
+        <label class="dim" style="font-size:12px">Shape</label>
+        <select id="cropAspect" class="project-select">
+          <option value="210:297">📖 A4 (210:297)</option>
+          <option value="2:3">Portrait 2:3</option>
+          <option value="3:4">Portrait 3:4</option>
+          <option value="1:1">Square 1:1</option>
+          <option value="16:9">Landscape 16:9</option>
+        </select>
+        <label class="dim" style="font-size:12px">Zoom</label>
+        <input id="cropZoom" type="range" min="100" max="300" value="100" style="flex:1; min-width:120px">
+      </div>
+      <canvas id="cropCanvas" width="640" height="480" style="width:100%; height:auto; background:#0b0e13; border:1px solid var(--line); border-radius:8px; touch-action:none; cursor:grab; display:block"></canvas>
+      <div class="row" style="gap:8px; margin-top:10px; align-items:center">
+        <button id="cropApply" class="ai-btn" type="button">✓ Apply crop</button>
+        <button id="cropCancel" class="ghost" type="button">Cancel</button>
+        <span id="cropInfo" class="dim" style="font-size:12px"></span>
       </div>
     </div>
   </div>

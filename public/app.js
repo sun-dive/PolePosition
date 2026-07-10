@@ -1552,6 +1552,85 @@ $('artOptimize').onclick = optimizeArtPrompt
 $('artGen').onclick = generateArt
 $('artEdit').onclick = editArt
 $('artUseCover').onclick = useArtAsCover
+$('artCrop').onclick = openCrop
+
+/* ---- ✂️ Interactive crop-to-aspect (drag to pan, slider to zoom; the bright frame is kept) ---- */
+let cropImg = null
+const cropState = { scale: 1, base: 1, x: 0, y: 0 }
+function cropFrame () {
+  const cv = $('cropCanvas'), pad = 26
+  const [aw, ah] = $('cropAspect').value.split(':').map(Number)
+  const availW = cv.width - pad * 2, availH = cv.height - pad * 2
+  let fw = availW, fh = fw * ah / aw
+  if (fh > availH) { fh = availH; fw = fh * aw / ah }
+  return { x: (cv.width - fw) / 2, y: (cv.height - fh) / 2, w: fw, h: fh }
+}
+function cropFit () {
+  const f = cropFrame()
+  cropState.base = Math.max(f.w / cropImg.width, f.h / cropImg.height)
+  $('cropZoom').value = 100
+  cropState.scale = cropState.base
+  cropState.x = f.x + (f.w - cropImg.width * cropState.scale) / 2
+  cropState.y = f.y + (f.h - cropImg.height * cropState.scale) / 2
+}
+function cropClamp () {
+  const f = cropFrame(), iw = cropImg.width * cropState.scale, ih = cropImg.height * cropState.scale
+  cropState.x = Math.min(f.x, Math.max(f.x + f.w - iw, cropState.x))
+  cropState.y = Math.min(f.y, Math.max(f.y + f.h - ih, cropState.y))
+}
+function cropDraw () {
+  const cv = $('cropCanvas'), ctx = cv.getContext('2d'), f = cropFrame()
+  ctx.fillStyle = '#0b0e13'; ctx.fillRect(0, 0, cv.width, cv.height)
+  if (cropImg) ctx.drawImage(cropImg, cropState.x, cropState.y, cropImg.width * cropState.scale, cropImg.height * cropState.scale)
+  ctx.fillStyle = 'rgba(6,8,12,.66)'
+  ctx.fillRect(0, 0, cv.width, f.y)
+  ctx.fillRect(0, f.y + f.h, cv.width, cv.height - f.y - f.h)
+  ctx.fillRect(0, f.y, f.x, f.h)
+  ctx.fillRect(f.x + f.w, f.y, cv.width - f.x - f.w, f.h)
+  ctx.strokeStyle = '#e6b877'; ctx.lineWidth = 2; ctx.strokeRect(f.x + 1, f.y + 1, f.w - 2, f.h - 2)
+}
+function openCrop () {
+  if (!artData) { $('artStatus').textContent = 'Generate or open an image first.'; return }
+  cropImg = new Image()
+  cropImg.onload = () => { cropFit(); cropClamp(); cropDraw(); $('cropInfo').textContent = cropImg.width + 'x' + cropImg.height + ' source'; $('cropModal').hidden = false }
+  cropImg.src = artData
+}
+let cropDrag = null
+$('cropCanvas').addEventListener('pointerdown', e => { if (!cropImg) return; cropDrag = { x: e.clientX, y: e.clientY, ox: cropState.x, oy: cropState.y }; $('cropCanvas').setPointerCapture(e.pointerId) })
+$('cropCanvas').addEventListener('pointermove', e => {
+  if (!cropDrag) return
+  const cv = $('cropCanvas'), sc = cv.width / cv.clientWidth
+  cropState.x = cropDrag.ox + (e.clientX - cropDrag.x) * sc
+  cropState.y = cropDrag.oy + (e.clientY - cropDrag.y) * sc
+  cropClamp(); cropDraw()
+})
+$('cropCanvas').addEventListener('pointerup', () => { cropDrag = null })
+$('cropCanvas').addEventListener('pointercancel', () => { cropDrag = null })
+$('cropZoom').addEventListener('input', () => {
+  if (!cropImg) return
+  const f = cropFrame(), z = parseInt($('cropZoom').value, 10) / 100
+  const cx = (f.x + f.w / 2 - cropState.x) / cropState.scale, cy = (f.y + f.h / 2 - cropState.y) / cropState.scale
+  cropState.scale = cropState.base * z
+  cropState.x = f.x + f.w / 2 - cx * cropState.scale
+  cropState.y = f.y + f.h / 2 - cy * cropState.scale
+  cropClamp(); cropDraw()
+})
+$('cropAspect').addEventListener('change', () => { if (cropImg) { cropFit(); cropClamp(); cropDraw() } })
+$('cropApply').onclick = () => {
+  if (!cropImg) return
+  const f = cropFrame(), s = cropState.scale
+  const sx = (f.x - cropState.x) / s, sy = (f.y - cropState.y) / s, sw = f.w / s, sh = f.h / s
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(sw)); c.height = Math.max(1, Math.round(sh))
+  const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(cropImg, sx, sy, sw, sh, 0, 0, c.width, c.height)
+  artData = c.toDataURL('image/png')
+  $('artImg').src = artData; $('artResult').hidden = false
+  $('cropModal').hidden = true
+  $('artStatus').textContent = 'Cropped to ' + c.width + 'x' + c.height + ' — Use as book cover, or insert.'
+}
+$('cropCancel').onclick = () => { $('cropModal').hidden = true }
+$('cropClose').onclick = () => { $('cropModal').hidden = true }
+$('cropModal').addEventListener('click', e => { if (e.target === $('cropModal')) $('cropModal').hidden = true })
 $('artInsert').onclick = insertArt
 $('artDownload').onclick = downloadArt
 $('artBanner').onclick = downloadBannerJpeg
