@@ -271,7 +271,7 @@ li{break-inside:avoid;page-break-inside:avoid}
 img{max-width:100%;height:auto;display:block;margin:1em auto;border-radius:6px;break-inside:avoid;page-break-inside:avoid}
 blockquote{break-inside:avoid;page-break-inside:avoid;border-left:3px solid #ccc;margin:1em 0;padding:.2em 1em;color:#555}
 a{color:#1a5fb4;text-decoration:none}hr{border:0;border-top:1px solid #ccc;margin:1.5em 0}
-.cover{page:cover;margin:0;page-break-after:always;width:100%;height:100vh;background-size:cover;background-position:center;background-repeat:no-repeat;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.cover{page:cover;margin:0;page-break-after:always;height:100vh;overflow:hidden}.cover img{display:block;width:100%;height:100%;object-fit:cover;object-position:center;border-radius:0}
 .chapter{page-break-before:always}`
   // PNG masters in public/art stay untouched; encode JPEG only into this PDF
   const refs = new Set()
@@ -281,7 +281,7 @@ a{color:#1a5fb4;text-decoration:none}hr{border:0;border-top:1px solid #ccc;margi
   const coverJpeg = book.cover ? await imgToJpeg(book.cover, 0.9) : ''
   let chapters = book.chapters.map(c => `<section class="chapter">${md(c.body || '')}</section>`).join('\n')
   for (const [ref, jpeg] of map) chapters = chapters.split(`src="${ref}"`).join(`src="${jpeg}"`)
-  const cover = coverJpeg ? `<div class="cover" style="background-image:url(${coverJpeg})"></div>` : ''
+  const cover = coverJpeg ? `<div class="cover"><img src="${coverJpeg}" alt=""/></div>` : ''
   const auto = '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print()},250)};window.onafterprint=function(){window.close()}</scr' + 'ipt>'
   const html = `<!doctype html><html><head><meta charset="utf-8"/><base href="${location.origin}/"/><title>${escapeHtml(book.title || 'Book')}</title><style>${css}</style></head><body>${cover}${chapters}${auto}</body></html>`
   const w = window.open('', '_blank')
