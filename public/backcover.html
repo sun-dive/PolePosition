@@ -98,9 +98,18 @@ Own your delivery and own your list</textarea>
       <div><label>Background</label><input id="bg" type="color" value="#0d1117"></div>
     </div>
     <div class="swatches" id="swatches"></div>
+    <div class="row" style="margin-top:14px">
+      <div><label>Format</label>
+        <select id="fmt"><option value="webp">WebP (smallest)</option><option value="jpeg">JPEG</option><option value="png">PNG (lossless)</option></select>
+      </div>
+      <div id="qualityWrap"><label>Quality <span id="qualityVal" class="hint"></span></label>
+        <input id="quality" type="range" min="60" max="100" value="90">
+      </div>
+    </div>
     <div class="btns">
-      <button id="dl">⬇ Download PNG</button>
+      <button id="dl">⬇ Download</button>
       <button class="ghost" id="reset">Reset</button>
+      <span id="sizeVal" class="hint" style="align-self:center"></span>
     </div>
   </div>
   <div class="stage">
@@ -234,6 +243,7 @@ function drawBack (gold, bg) {
 function draw () {
   const gold = $('gold').value, bg = $('bg').value
   if (face === 'front') drawFront(gold, bg); else drawBack(gold, bg)
+  scheduleSize()
 }
 function setFace (f) {
   face = f
@@ -261,7 +271,26 @@ $('imgFile').addEventListener('change', e => {
   r.readAsDataURL(f)
 })
 $('imgClear').onclick = () => { embImg = null; $('imgFile').value = ''; draw() }
-$('dl').onclick = () => { const a = document.createElement('a'); a.download = `book-cover-${face}.png`; a.href = cv.toDataURL('image/png'); a.click() }
+
+// Output format (WebP smallest → JPEG → PNG lossless). PNG ignores quality; the cover has a solid background
+// so JPEG/WebP lose no transparency. Smaller file = cheaper on-chain mint.
+function encode () {
+  const fmt = $('fmt').value, q = (parseInt($('quality').value, 10) || 90) / 100
+  const url = fmt === 'png' ? cv.toDataURL('image/png') : cv.toDataURL('image/' + fmt, q)
+  return { fmt, url, ext: fmt === 'jpeg' ? 'jpg' : fmt }
+}
+let sizeTimer = null
+function updateSize () {
+  const { fmt, url } = encode()
+  const bytes = Math.round((url.length - url.indexOf(',') - 1) * 3 / 4)
+  $('sizeVal').textContent = `${fmt.toUpperCase()} ≈ ${(bytes / 1024).toFixed(0)} KB`
+  $('qualityWrap').style.visibility = fmt === 'png' ? 'hidden' : 'visible'
+}
+function scheduleSize () { clearTimeout(sizeTimer); sizeTimer = setTimeout(updateSize, 250) }
+$('fmt').addEventListener('change', updateSize)
+$('quality').addEventListener('input', () => { $('qualityVal').textContent = $('quality').value + '%'; updateSize() })
+$('qualityVal').textContent = $('quality').value + '%'
+$('dl').onclick = () => { const { url, ext } = encode(); const a = document.createElement('a'); a.download = `book-cover-${face}.${ext}`; a.href = url; a.click() }
 $('reset').onclick = () => location.reload()
 const presets = [['#e6b877','#0d1117'],['#f0c674','#0b0e13'],['#d9a441','#14100a'],['#7ee0c0','#0c1512'],['#ff7518','#140a04']]
 const sw = $('swatches')
