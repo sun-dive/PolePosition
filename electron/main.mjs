@@ -7,6 +7,7 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { spawnSync } from 'node:child_process'
 import { join, delimiter } from 'node:path'
+import { existsSync } from 'node:fs'
 import net from 'node:net'
 
 // GUI-launched (double-clicked) apps don't inherit your shell's PATH, so `claude`, ffmpeg, magick and flac can be
@@ -48,10 +49,17 @@ function waitForPort (port, timeoutMs = 20000) {
   })
 }
 
-// Non-blocking heads-up: AI features need Claude Code (subscription); everything else works without it.
+// Non-blocking heads-up: AI features need the Claude subscription; everything else works without it.
+// Detect the SUBSCRIPTION CREDENTIALS (~/.claude/.credentials.json), NOT a `claude` command on PATH: the Agent
+// SDK reads those creds and ships its own binary in node_modules, so a GUI app that has no PATH `claude` (the
+// normal case) still writes fine. Fall back to a PATH `claude` for setups that store creds elsewhere; warn only
+// if neither is present.
 function warnIfNoClaude () {
-  const r = spawnSync('claude', ['--version'], { stdio: 'ignore' })
-  if (r.error) {
+  const home = app.getPath('home')
+  const signedIn = existsSync(join(home, '.claude', '.credentials.json')) ||
+    existsSync(join(home, '.claude', '.credentials')) ||
+    !spawnSync('claude', ['--version'], { stdio: 'ignore' }).error
+  if (!signedIn) {
     void dialog.showMessageBox({
       type: 'info',
       title: 'Claude Code not detected',
