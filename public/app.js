@@ -1412,7 +1412,7 @@ async function editArt () {
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artEditStatus').textContent = data.error || ('Error ' + r.status); return }
     { const px = parseShape($('artAspect').value).px; artData = px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl }
-    $('artImg').src = artData; $('artEditInstr').value = ''; $('artEditStatus').textContent = 'Edited — insert, or refine again.'
+    $('artImg').src = artData; $('artEditStatus').textContent = 'Edited — insert, or tweak the instruction and refine again.' // keep the instruction so you can re-run/tweak it
   } catch (e) { $('artEditStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artEdit').disabled = false }
 }
