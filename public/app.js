@@ -538,7 +538,30 @@ const DEFAULT_COVER_PROMPT = `Premium book-cover illustration, portrait orientat
 function updateCoverButton () { $('btnArt').classList.toggle('has-cover', !!book.cover) }
 // A shape-selector value like "1:1@800" means: generate at aspect 1:1, then resize the result to 800×800.
 // (fal's nano-banana works by aspect ratio, not pixels — so exact sizes are a client-side downscale.)
-function parseShape (v) { const [aspect, px] = String(v || '').split('@'); return { aspect: aspect || '2:3', px: px ? parseInt(px, 10) : 0 } }
+function parseShape (v) {
+  v = String(v || '')
+  // nano-banana has no A4 ratio → generate the nearest wider portrait (3:4) then crop the SIDES to A4 (210:297),
+  // which trims only left/right background, never the (centred) title or author.
+  if (v === 'A4') return { aspect: '3:4', px: 0, crop: [210, 297] }
+  const [aspect, px] = v.split('@'); return { aspect: aspect || '2:3', px: px ? parseInt(px, 10) : 0, crop: null }
+}
+// Center-crop a data URL to a target aspect (aw:ah). Used for A4 covers. High-quality downscale of the crop.
+function cropToAspectDataUrl (dataUrl, aw, ah) {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => {
+      const target = aw / ah
+      let sw = img.width, sh = img.height
+      if (sw / sh > target) sw = Math.round(sh * target); else sh = Math.round(sw / target)
+      const sx = Math.round((img.width - sw) / 2), sy = Math.round((img.height - sh) / 2)
+      const c = document.createElement('canvas'); c.width = sw; c.height = sh
+      const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+      resolve(c.toDataURL('image/png'))
+    }
+    img.onerror = () => resolve(dataUrl); img.src = dataUrl
+  })
+}
 // Cover-crop-center an image data URL into a px×px WebP — the on-chain NFT cover size (matches the OG-crop pattern).
 function toSquareDataUrl (dataUrl, px) {
   return new Promise(resolve => {
@@ -1397,18 +1420,19 @@ async function generateArt () {
   const base = $('artPrompt').value.trim()
   if (!base) { $('artStatus').textContent = 'Describe/optimize a prompt first.'; return }
   const style = $('artStyle').value.trim()
-  const { aspect, px } = parseShape($('artAspect').value)
+  const { aspect, px, crop } = parseShape($('artAspect').value)
   const frame = aspect === '16:9' ? 'Full-bleed wide landscape composition that fills the entire frame edge to edge — no empty side margins, not a small centred motif.'
     : aspect === '3:4' ? 'Full-bleed tall portrait composition that fills the frame top to bottom.'
     : 'Full-bleed composition that fills the entire square frame.'
-  const prompt = `${base}${style ? `\n\nArt style (apply consistently): ${style}` : ''}\n\n${frame}`
+  const cropNote = crop ? '\n\nKeep the title, main subject and author name centred with clear left and right margins — the sides will be trimmed to A4 proportions.' : ''
+  const prompt = `${base}${style ? `\n\nArt style (apply consistently): ${style}` : ''}\n\n${frame}${cropNote}`
   $('artGen').disabled = true; $('artStatus').textContent = 'Generating… (can take 20–40s)'
   try {
     const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: aspect }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artStatus').textContent = data.error || ('Error ' + r.status); return }
-    artData = px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl
-    $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = px ? `Done (${px}×${px}) — insert, refine, or regenerate.` : 'Done — insert, refine, or regenerate.'
+    artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl)
+    $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = crop ? 'Done (A4) — insert, refine, or regenerate.' : (px ? `Done (${px}×${px}) — insert, refine, or regenerate.` : 'Done — insert, refine, or regenerate.')
   } catch (e) { $('artStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artGen').disabled = false }
 }
@@ -1421,7 +1445,7 @@ async function editArt () {
     const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: artData }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artEditStatus').textContent = data.error || ('Error ' + r.status); return }
-    { const px = parseShape($('artAspect').value).px; artData = px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl }
+    { const { px, crop } = parseShape($('artAspect').value); artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl) }
     $('artImg').src = artData; $('artEditStatus').textContent = 'Edited — insert, or tweak the instruction and refine again.' // keep the instruction so you can re-run/tweak it
   } catch (e) { $('artEditStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artEdit').disabled = false }
