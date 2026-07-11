@@ -428,6 +428,40 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // ── Video (MP4/MOV/WebM) → downsized looping animated WebP (16:9 or square, low fps) for on-chain content ──
+  // Trim the clip in a video editor first; this just squeezes it small enough to mint. Options via query string;
+  // raw request body is the video file (base64 JSON would bloat a big clip by a third).
+  //   ?aspect=16:9|1:1 · fps=15|7|5 · width=<96..1024> · q=<1..100>
+  if (url.pathname === '/api/video-webp' && req.method === 'POST') {
+    const stamp = Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const inPath = join(tmpdir(), 'pp-vid-' + stamp), outPath = join(tmpdir(), 'pp-vid-' + stamp + '.webp')
+    try {
+      const buf = await readRawBody(req, 400 * 1024 * 1024) // up to 400 MB source clip
+      if (buf.length === 0) return sendJson(res, 400, { error: 'no video uploaded' })
+      await writeFile(inPath, buf)
+      const aspect = url.searchParams.get('aspect') === '1:1' ? '1:1' : '16:9'
+      const fpsReq = Number(url.searchParams.get('fps'))
+      const fps = [5, 7, 15].includes(fpsReq) ? fpsReq : 15
+      const width = Math.min(Math.max(Number(url.searchParams.get('width')) || 480, 96), 1024)
+      const q = Math.min(Math.max(Number(url.searchParams.get('q')) || 55, 1), 100)
+      const W = Math.round(width / 2) * 2
+      const H = aspect === '1:1' ? W : Math.round((W * 9 / 16) / 2) * 2
+      // cover-crop: scale up to fill WxH (keeping the source aspect), then centre-crop to exactly WxH — robust
+      // for any input shape (16:9 in → no crop; other shapes → trimmed to the chosen frame), then drop the fps.
+      const vf = `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`
+      await runFfmpeg(['-y', '-i', inPath, '-vcodec', 'libwebp', '-vf', vf, '-loop', '0', '-lossless', '0', '-q:v', String(q), '-compression_level', '6', '-an', outPath])
+      const out = await readFile(outPath)
+      let frames = 0
+      try { frames = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).length } catch { /* leave 0 */ }
+      const duration = frames ? frames / fps : 0
+      return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + out.toString('base64'), size: out.length, frames, duration, width: W, height: H, fps })
+    } catch (e) {
+      return sendJson(res, 502, { error: 'video conversion failed: ' + (e.message || 'error') })
+    } finally {
+      await unlink(inPath).catch(() => {}); await unlink(outPath).catch(() => {})
+    }
+  }
+
   // ── WAV → FLAC (lossless, max compression) via the reference flac encoder ──
   if (url.pathname === '/api/flac' && req.method === 'POST') {
     const base = join(tmpdir(), 'pp-flac-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))

@@ -22,6 +22,7 @@
       <button id="btnTimeline" class="ghost" type="button" title="Build a scene-timeline music video cue synced to a song">🎞️ Music video</button>
       <button id="btnLyrics" class="ghost" type="button" title="Build a synced lyric (.lrc) timeline by tapping along to the song">🎤 Lyrics</button>
       <button id="btnFlac" class="ghost" type="button" title="Encode a WAV to lossless FLAC (max compression) for minting">🎚️ WAV→FLAC</button>
+      <button id="btnVideo" class="ghost" type="button" title="Downsize a trimmed video (MP4/MOV) to a small looping animated WebP (16:9 or square, low fps) for on-chain content">🎥 Video→WebP</button>
 <button id="btnTag" class="ghost" type="button" title="Embed cover art, lyrics and tags into a FLAC or MP3 (in-app — no Kid3)">🏷️ Audio Tags</button>
       <button id="btnArt" class="ghost" type="button" title="Create art — book covers, chapter images, or 800×800 NFT art">🎨 Art</button>
       <button id="btnBookCover" class="ghost" type="button" title="Design a flat book cover (front or back) with perfect text + optional image, to feed into the 3D render">📖 Book Cover</button>
@@ -224,6 +225,56 @@
       <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
         <button id="flacEncode" class="ai-btn" type="button">Encode to FLAC</button>
         <span id="flacStatus" class="dim" style="font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="videoModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:540px">
+      <div class="modal-head"><b>🎥 Video → looping WebP</b><button id="videoClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 10px">Trim your clip in a video editor (e.g. Kdenlive) and export an MP4, then downsize it here to a small looping animated WebP for minting. <b>Keep it short</b> — length drives the on-chain size the most.</p>
+      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px">
+        <label class="ghost" style="cursor:pointer">🎬 Choose video<input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mp4,.mov,.webm,.mkv" hidden></label>
+        <span id="videoName" class="dim" style="font-size:12px"></span>
+      </div>
+      <div class="row" style="gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; font-size:12px">
+        <label style="display:flex; flex-direction:column; gap:3px">Shape
+          <select id="videoAspect">
+            <option value="16:9">16:9 (wide)</option>
+            <option value="1:1">1:1 (square)</option>
+          </select>
+        </label>
+        <label style="display:flex; flex-direction:column; gap:3px">Frame rate
+          <select id="videoFps">
+            <option value="15">15 fps</option>
+            <option value="7">7 fps</option>
+            <option value="5">5 fps</option>
+          </select>
+        </label>
+        <label style="display:flex; flex-direction:column; gap:3px">Width
+          <select id="videoWidth">
+            <option value="320">320 px</option>
+            <option value="384">384 px</option>
+            <option value="480" selected>480 px</option>
+            <option value="512">512 px</option>
+            <option value="640">640 px</option>
+          </select>
+        </label>
+        <label style="display:flex; flex-direction:column; gap:3px">Quality
+          <select id="videoQ">
+            <option value="40">40 (small)</option>
+            <option value="55" selected>55</option>
+            <option value="70">70 (sharper)</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
+        <button id="videoBuild" class="ai-btn" type="button">🎥 Make WebP loop</button>
+        <span id="videoStatus" class="dim" style="font-size:12px"></span>
+      </div>
+      <div id="videoResult" hidden style="margin-top:10px">
+        <img id="videoImg" alt="looping webp preview" style="max-width:100%; border-radius:6px; background:#0b0e13" />
+        <div class="cover-actions" style="margin-top:6px; align-items:center; gap:8px"><button id="videoDownload" class="ghost" type="button">Download</button><span id="videoInfo" class="dim" style="font-size:12px"></span></div>
       </div>
     </div>
   </div>

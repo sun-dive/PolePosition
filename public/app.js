@@ -1081,6 +1081,37 @@ $('flacEncode').onclick = async () => {
   finally { $('flacEncode').disabled = false }
 }
 
+/* ---- 🎥 Video → looping animated WebP: downsize a trimmed MP4/MOV for on-chain motion content ---- */
+let videoFile = null, videoResultData = ''
+$('btnVideo').onclick = () => { $('videoModal').hidden = false }
+$('videoClose').onclick = () => { $('videoModal').hidden = true }
+$('videoModal').addEventListener('click', e => { if (e.target === $('videoModal')) $('videoModal').hidden = true })
+$('videoInput').onchange = () => { videoFile = $('videoInput').files[0] || null; $('videoName').textContent = videoFile ? videoFile.name : ''; $('videoStatus').textContent = ''; $('videoResult').hidden = true }
+$('videoBuild').onclick = async () => {
+  if (!videoFile) { $('videoStatus').textContent = 'Choose a video first.'; return }
+  const qs = new URLSearchParams({ aspect: $('videoAspect').value, fps: $('videoFps').value, width: $('videoWidth').value, q: $('videoQ').value })
+  $('videoBuild').disabled = true; $('videoStatus').textContent = 'Converting… (downsizing + encoding the loop — large clips take a moment)'
+  try {
+    const r = await fetch('/api/video-webp?' + qs, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: videoFile })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('videoStatus').textContent = data.error || ('Error ' + r.status); return }
+    videoResultData = data.dataUrl
+    $('videoImg').src = videoResultData; $('videoResult').hidden = false
+    const kb = data.size / 1024, mb = data.size / 1048576
+    const sizeStr = mb >= 1 ? mb.toFixed(2) + ' MB' : Math.round(kb) + ' KB'
+    $('videoInfo').textContent = `${data.width}×${data.height} · ${data.fps} fps · ${data.frames} frames · ${(data.duration || 0).toFixed(1)}s · ${sizeStr}`
+    $('videoStatus').textContent = mb > 3
+      ? `Made (${sizeStr}) — large for on-chain; try a lower frame rate, smaller width, or a shorter clip.`
+      : `Made (${sizeStr}) — on-chain-friendly. Download + mint in PharLap.`
+  } catch (e) { $('videoStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('videoBuild').disabled = false }
+}
+$('videoDownload').onclick = () => {
+  if (!videoResultData) return
+  const base = (videoFile ? videoFile.name.replace(/\.[^.]+$/, '') : 'clip').replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+  const a = document.createElement('a'); a.href = videoResultData; a.download = base + '-loop.webp'; a.click()
+}
+
 /* ---- 🏷️ Tag editor: embed cover art by role + lyrics + text tags into a FLAC (/api/tag → metaflac) ---- */
 let tagFlacFile = null, tagFlacBuf = null
 const tagArt = { front: null, back: null, media: null } // each: { data:<base64>, mime, width, height }
