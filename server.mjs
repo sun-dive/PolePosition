@@ -368,7 +368,14 @@ const server = createServer(async (req, res) => {
     if (!body.prompt || !String(body.prompt).trim()) return sendJson(res, 400, { error: 'Describe the image first.' })
     const width = Math.min(Math.max(Number(body.width) || 1024, 256), 1536)
     const height = Math.min(Math.max(Number(body.height) || 1536, 256), 1536)
-    const imageUrls = (typeof body.image === 'string' && body.image.startsWith('data:')) ? [body.image] : undefined
+    // One source (edit) OR several (merge/composite via nano-banana/edit's multi-image input). data: URLs only.
+    let imageUrls
+    if (Array.isArray(body.images)) {
+      const arr = body.images.filter(s => typeof s === 'string' && s.startsWith('data:'))
+      if (arr.length) imageUrls = arr
+    } else if (typeof body.image === 'string' && body.image.startsWith('data:')) {
+      imageUrls = [body.image]
+    }
     try {
       const dataUrl = await falImage({ prompt: String(body.prompt).trim(), model: body.model, aspectRatio: body.aspectRatio, width, height, imageUrls })
       return sendJson(res, 200, { dataUrl })
@@ -624,7 +631,9 @@ const server = createServer(async (req, res) => {
   if (rel.includes('..')) { res.writeHead(403); res.end('Forbidden'); return }
   try {
     const data = await readFile(join(ROOT, rel))
-    res.writeHead(200, { 'content-type': TYPES[extname(rel)] ?? 'application/octet-stream' })
+    // Local-first app served from disk — never let Chromium/Electron cache the app shell, or edits to
+    // index.html/app.js won't show up on restart. No upside to caching a file that's already local.
+    res.writeHead(200, { 'content-type': TYPES[extname(rel)] ?? 'application/octet-stream', 'cache-control': 'no-store, must-revalidate' })
     res.end(data)
   } catch {
     res.writeHead(404); res.end('Not found')

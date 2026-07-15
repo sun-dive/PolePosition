@@ -700,7 +700,7 @@ async function addLibFiles (files) {
     tlLib.set(f.name, entry)
     try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) entry.dur = (ms / 1000).toFixed(1) + 's' } catch { /* not animated */ }
   }
-  renderLib(); refreshSceneSelects()
+  renderLib(); refreshSceneSelects(); saveTimelineSoon()
 }
 function usageCount (name) { return Array.from($('tlList').children).filter(li => li.querySelector('.tl-scene').value === name).length }
 function renderLib () {
@@ -717,7 +717,7 @@ function renderLib () {
     del.onclick = () => {
       URL.revokeObjectURL(e.url); tlLib.delete(name)
       Array.from($('tlList').children).forEach(li2 => { if (li2.querySelector('.tl-scene').value === name) li2.remove() })
-      renumberTl(); renderLib(); refreshSceneSelects(); updateTlPreview()
+      renumberTl(); renderLib(); refreshSceneSelects(); updateTlPreview(); saveTimelineSoon()
     }
     li.append(img, nm, du, use, del); ul.append(li)
   }
@@ -739,7 +739,7 @@ function renumberTl () { Array.from($('tlList').children).forEach((li, i) => { l
 function sortTl () {
   const list = $('tlList'), rows = Array.from(list.children)
   rows.sort((a, b) => (parseLrcTime(a.querySelector('.tl-time').value) ?? 1e9) - (parseLrcTime(b.querySelector('.tl-time').value) ?? 1e9))
-  rows.forEach(r => list.append(r)); renumberTl()
+  rows.forEach(r => list.append(r)); renumberTl(); saveTimelineSoon()
 }
 // Reorder a clip: swap its start time with the neighbour's (dir -1 = earlier/up, +1 = later/down), keeping the
 // time slots intact — so the clip slides up/down the sequence and takes the neighbour's slot. The row (with its
@@ -765,12 +765,12 @@ function addTlRow (presetName, presetTime) { // presets supplied when restoring 
   const a = $('tlPlayer')
   if (presetTime != null) time.value = presetTime
   else if (a.src && a.currentTime > 0) time.value = fmtLrc(a.currentTime) // default to current playback position
-  sel.onchange = () => { renderLib(); updateTlPreview() }
+  sel.onchange = () => { renderLib(); updateTlPreview(); saveTimelineSoon() }
   setB.onclick = () => { if (!a.src) { $('tlStatus').textContent = 'Load a song first, then scrub + Set.'; return } time.value = fmtLrc(a.currentTime); sortTl(); updateTlPreview() }
   upB.onclick = () => moveTlRow(li, -1)
   dnB.onclick = () => moveTlRow(li, 1)
   time.onchange = () => { sortTl(); updateTlPreview() }
-  delB.onclick = () => { li.remove(); renumberTl(); renderLib(); updateTlPreview() }
+  delB.onclick = () => { li.remove(); renumberTl(); renderLib(); updateTlPreview(); saveTimelineSoon() }
   li.append(num, sel, time, upB, dnB, setB, delB)
   $('tlList').append(li); sortTl(); renderLib(); updateTlPreview()
 }
@@ -804,16 +804,39 @@ function downloadCue () {
   triggerDownload(new Blob([text], { type: 'text/plain' }), 'video.cue')
   $('tlStatus').textContent = 'Saved video.cue — mint it with the song + scene clips.'
 }
+// Transcode a raster STILL (PNG/JPEG) to WebP so the bundle rides small on-chain. Animated clips (WebP/GIF)
+// pass through untouched so their motion survives. Returns { name, bytes } — stills get a .webp extension.
+async function toWebpForExport (name, file, quality = 0.9) {
+  if (!/\.(png|jpe?g)$/i.test(name)) return { name, bytes: new Uint8Array(await file.arrayBuffer()) }
+  try {
+    const bmp = await createImageBitmap(file)
+    const cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height
+    cv.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close()
+    const blob = await new Promise(res => cv.toBlob(res, 'image/webp', quality))
+    if (!blob) throw new Error('encode failed')
+    return { name: name.replace(/\.(png|jpe?g)$/i, '.webp'), bytes: new Uint8Array(await blob.arrayBuffer()) }
+  } catch { return { name, bytes: new Uint8Array(await file.arrayBuffer()) } } // fall back to the original bytes
+}
 async function downloadBundle () {
   const text = cueText()
   if (!text) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
-  $('tlStatus').textContent = 'Packing bundle…'
-  const entries = []
-  for (const [name, e] of tlLib) entries.push({ name, bytes: new Uint8Array(await e.file.arrayBuffer()) })
+  const webp = !$('tlWebp') || $('tlWebp').checked
+  $('tlStatus').textContent = webp ? 'Packing bundle (stills→WebP)…' : 'Packing bundle…'
+  const entries = [], rename = new Map()
+  let before = 0, after = 0
+  for (const [name, e] of tlLib) {
+    const out = webp ? await toWebpForExport(name, e.file) : { name, bytes: new Uint8Array(await e.file.arrayBuffer()) }
+    rename.set(name, out.name); entries.push(out)
+    before += e.file.size; after += out.bytes.length
+  }
   if (tlAudioFile) entries.push({ name: tlAudioFile.name, bytes: new Uint8Array(await tlAudioFile.arrayBuffer()) })
-  entries.push({ name: 'video.cue', bytes: new TextEncoder().encode(text) })
+  // Rebuild the cue with the (possibly renamed) filenames so its lines still match the packed clips.
+  const cue = tlPlacements().map(s => '[' + fmtLrc(s.t) + ']' + (rename.get(s.name) || s.name)).join('\n') + '\n'
+  entries.push({ name: 'video.cue', bytes: new TextEncoder().encode(cue) })
   triggerDownload(makeZip(entries), 'music-video-bundle.zip')
-  $('tlStatus').textContent = 'Bundle ready (' + tlLib.size + ' clips' + (tlAudioFile ? ' + song' : '') + ' + cue). Unzip, then mint all together in PharLap.'
+  const saved = before - after
+  const savedMsg = webp && saved > 0 ? ` · WebP saved ${(saved / 1048576).toFixed(1)}MB` : ''
+  $('tlStatus').textContent = 'Bundle ready (' + tlLib.size + ' clips' + (tlAudioFile ? ' + song' : '') + ' + cue' + savedMsg + '). Unzip, then mint all together in PharLap.'
 }
 
 /* --- minimal store-only ZIP (WebP/audio are already compressed, so no deflate needed) --- */
@@ -873,6 +896,7 @@ function setSong (f) {
   if (tlAudioUrl) URL.revokeObjectURL(tlAudioUrl)
   tlAudioFile = f; tlAudioUrl = URL.createObjectURL(f)
   const a = $('tlPlayer'); a.src = tlAudioUrl; a.style.display = 'block'; $('tlAudioName').textContent = f.name
+  saveTimelineSoon()
 }
 function clearTimeline () { $('tlList').innerHTML = ''; renumberTl() }
 function clearLibrary () { for (const e of tlLib.values()) URL.revokeObjectURL(e.url); tlLib.clear() }
@@ -922,13 +946,97 @@ async function loadBundleFile (file) {
   $('tlStatus').textContent = report + '.'
 }
 
-function openTimeline () { renderLib(); $('tlModal').hidden = false }
+/* ---- Music-video timeline auto-persist (IndexedDB — survives reloads, big enough to hold the media) ----
+   Blobs are too big for localStorage, so they live in IndexedDB: each scene clip + the song under its own
+   key, plus a small "meta" record (clip list + durations + song name + the video.cue). Autosaves (debounced)
+   on every edit; restores silently the first time you open the tool. A clip blob is immutable per filename,
+   so it's written once — edits that only move placements rewrite just the tiny meta record. The bundle export
+   stays the portable/complete save; this is the crash-safety net. */
+const MV_DB = 'polepos-mv', MV_STORE = 'files'
+let mvDbPromise = null
+function mvDb () {
+  if (!mvDbPromise) mvDbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(MV_DB, 1)
+    req.onupgradeneeded = () => req.result.createObjectStore(MV_STORE)
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+  return mvDbPromise
+}
+// One request per transaction, created + issued synchronously in the executor so the tx stays active.
+function mvOp (mode, fn) {
+  return mvDb().then(db => new Promise((resolve, reject) => {
+    const req = fn(db.transaction(MV_STORE, mode).objectStore(MV_STORE))
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  }))
+}
+const mvGet = k => mvOp('readonly', st => st.get(k))
+const mvPut = (k, v) => mvOp('readwrite', st => st.put(v, k))
+const mvDel = k => mvOp('readwrite', st => st.delete(k))
+const mvKeys = () => mvOp('readonly', st => st.getAllKeys())
+
+const mvPersisted = new Set() // clip keys already written (blobs are immutable per filename → write once)
+let mvSongName = '', mvRestored = false, mvSaveTimer = null
+function saveTimelineSoon () { clearTimeout(mvSaveTimer); mvSaveTimer = setTimeout(saveTimelineState, 700) }
+async function saveTimelineState () {
+  try {
+    const clips = [], want = new Set(['meta'])
+    for (const [name, e] of tlLib) {
+      clips.push({ name, dur: e.dur }); const key = 'clip:' + name; want.add(key)
+      if (!mvPersisted.has(key)) { await mvPut(key, e.file); mvPersisted.add(key) }
+    }
+    if (tlAudioFile) {
+      want.add('song')
+      if (mvSongName !== tlAudioFile.name) { await mvPut('song', tlAudioFile); mvSongName = tlAudioFile.name }
+    }
+    await mvPut('meta', { clips, songName: tlAudioFile ? tlAudioFile.name : '', cue: cueText() })
+    for (const k of Array.from(mvPersisted)) if (!want.has(k)) { await mvDel(k); mvPersisted.delete(k) } // prune removed clips
+    if (!tlAudioFile && mvSongName) { await mvDel('song'); mvSongName = '' }
+  } catch { /* best-effort autosave — never block editing */ }
+}
+async function restoreTimelineState () {
+  if (mvRestored) return
+  mvRestored = true
+  let meta
+  try { meta = await mvGet('meta') } catch { return }
+  if (!meta || ((!meta.clips || !meta.clips.length) && !meta.songName)) return
+  try {
+    const files = []
+    for (const c of (meta.clips || [])) {
+      const blob = await mvGet('clip:' + c.name)
+      if (blob) { files.push(new File([blob], c.name, { type: mimeFromName(c.name) })); mvPersisted.add('clip:' + c.name) }
+    }
+    if (files.length) await addLibFiles(files)
+    if (meta.songName) { const s = await mvGet('song'); if (s) { setSong(new File([s], meta.songName, { type: mimeFromName(meta.songName) })); mvSongName = meta.songName } }
+    if (meta.cue) importCueText(meta.cue)
+    renderLib(); updateTlPreview()
+    const n = tlLib.size
+    if (n) $('tlStatus').textContent = `Restored your last session — ${n} clip${n === 1 ? '' : 's'}${meta.songName ? ' + song' : ''}${meta.cue ? ' + timeline' : ''}.`
+  } catch { /* ignore restore errors — leave a clean, empty tool */ }
+}
+async function clearTimelineStore () { try { for (const k of await mvKeys()) await mvDel(k) } catch {} mvPersisted.clear(); mvSongName = '' }
+async function clearAllTimeline () {
+  if (tlLib.size === 0 && !tlAudioFile && $('tlList').children.length === 0) { $('tlStatus').textContent = 'Already empty.'; return }
+  if (!confirm('Clear the whole timeline — scene clips, song and placements — and the auto-saved session? (Download a bundle first if you want to keep it.)')) return
+  clearTimeline(); clearLibrary()
+  if (tlAudioUrl) URL.revokeObjectURL(tlAudioUrl)
+  tlAudioUrl = ''; tlAudioFile = null
+  $('tlPlayer').removeAttribute('src'); $('tlPlayer').style.display = 'none'; $('tlAudioName').textContent = ''
+  $('tlPreview').removeAttribute('src'); $('tlPreview').style.display = 'none'; $('tlPreviewHint').style.display = ''
+  renderLib(); refreshSceneSelects()
+  await clearTimelineStore()
+  $('tlStatus').textContent = 'Cleared — fresh timeline.'
+}
+
+function openTimeline () { restoreTimelineState(); renderLib(); $('tlModal').hidden = false }
 $('btnTimeline').onclick = openTimeline
 $('tlClose').onclick = () => { $('tlModal').hidden = true }
 $('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('tlModal').hidden = true })
 $('tlAddFiles').onchange = () => { const fs = Array.from($('tlAddFiles').files || []); if (fs.length) addLibFiles(fs); $('tlAddFiles').value = '' }
 $('tlAdd').onclick = () => addTlRow()
 $('tlDownload').onclick = downloadCue
+$('tlClear').onclick = clearAllTimeline
 $('tlBundle').onclick = downloadBundle
 $('tlLoadBundle').onchange = () => { const f = $('tlLoadBundle').files[0]; if (f) loadBundleFile(f); $('tlLoadBundle').value = '' }
 $('tlLoadCue').onchange = () => { const f = $('tlLoadCue').files[0]; if (f) loadCueFile(f); $('tlLoadCue').value = '' }
@@ -1676,6 +1784,33 @@ $('artFile').onchange = e => {
   const rd = new FileReader()
   rd.onload = () => { artData = rd.result; $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = 'Image loaded — insert or refine it.' }
   rd.readAsDataURL(f); e.target.value = ''
+}
+/* ---- Merge two images into one (nano-banana/edit multi-image composite) ---- */
+let mergeA = null, mergeB = null
+function wireMergeSlot (pickId, fileId, thumbId, set) {
+  $(pickId).onclick = () => $(fileId).click()
+  $(fileId).onchange = e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return
+    const rd = new FileReader()
+    rd.onload = () => { set(rd.result); const t = $(thumbId); t.src = rd.result; t.style.display = '' }
+    rd.readAsDataURL(f); e.target.value = ''
+  }
+}
+wireMergeSlot('mergePickA', 'mergeFileA', 'mergeThumbA', v => { mergeA = v })
+wireMergeSlot('mergePickB', 'mergeFileB', 'mergeThumbB', v => { mergeB = v })
+$('mergeGo').onclick = async () => {
+  if (!mergeA || !mergeB) { $('mergeStatus').textContent = 'Pick both Image A and Image B first.'; return }
+  const prompt = $('mergePrompt').value.trim() || 'Combine these two images into one cohesive, photorealistic composite scene — match the lighting and perspective so it reads as a single photograph.'
+  const { aspect, px, crop } = parseShape($('artAspect').value)
+  $('mergeGo').disabled = true; $('mergeStatus').textContent = 'Merging… (can take 20–40s)'
+  try {
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, images: [mergeA, mergeB], aspectRatio: aspect }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('mergeStatus').textContent = data.error || ('Error ' + r.status); return }
+    artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl)
+    $('artImg').src = artData; $('artResult').hidden = false; $('mergeStatus').textContent = 'Merged — refine, crop, download, insert or animate below.'
+  } catch (e) { $('mergeStatus').textContent = 'Request failed — is the server running? ' + e.message }
+  finally { $('mergeGo').disabled = false }
 }
 $('artStyle').oninput = e => { book.artStyle = e.target.value; save() }
 $('artStyleTemplate').onchange = e => { if (e.target.value) { $('artStyle').value = e.target.value; book.artStyle = e.target.value; save() } e.target.value = '' }
