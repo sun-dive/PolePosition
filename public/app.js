@@ -781,13 +781,20 @@ function tlPlacements () {
     .map(s => ({ t: s.t, name: s.name, url: tlLib.get(s.name).url }))
     .sort((a, b) => a.t - b.t)
 }
+let tlCurrentT = null // which placement (by start time) is showing, so a clip's loop restarts when its cue fires
 function updateTlPreview () {
   const scenes = tlPlacements(); if (scenes.length === 0) return
   const ct = $('tlPlayer').currentTime
   let cur = scenes[0]
   for (const s of scenes) { if (s.t <= ct) cur = s; else break }
   const img = $('tlPreview')
-  if (img.getAttribute('src') !== cur.url) { img.src = cur.url; img.style.display = 'block'; $('tlPreviewHint').style.display = 'none' }
+  if (cur.t === tlCurrentT && img.getAttribute('src')) return // same placement still active — let it keep looping
+  tlCurrentT = cur.t
+  img.style.display = 'block'; $('tlPreviewHint').style.display = 'none'
+  // Restart the clip from frame 0 whenever its cue fires, so the loop syncs to the beat. A new URL loads fresh
+  // at frame 0; a reused clip (same URL) needs a clear + reload to reset its animation to the start.
+  if (img.getAttribute('src') === cur.url) { img.src = ''; requestAnimationFrame(() => { img.src = cur.url }) }
+  else img.src = cur.url
 }
 function cueText () {
   const scenes = tlPlacements()
