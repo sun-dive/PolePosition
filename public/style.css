@@ -123,8 +123,8 @@ body.rich-mode .rich-editor {
 .seq-step .seq-del { line-height: 1; padding: 2px 8px; }
 #seqFps { background: var(--bg); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 5px 8px; font: inherit; }
 /* Music-video scene timeline */
-.tl-preview { position: relative; width: 100%; max-width: 260px; aspect-ratio: 1; margin: 0 auto 10px; background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-.tl-preview img { width: 100%; height: 100%; object-fit: cover; display: none; }
+.tl-preview { position: relative; width: 100%; max-width: 340px; aspect-ratio: 16 / 9; margin: 0 auto 10px; background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.tl-preview img { width: 100%; height: 100%; object-fit: contain; display: none; } /* contain = show the whole frame (16:9 fills, square pillarboxes) — never crop the scene */
 .tl-preview .dim { position: absolute; font-size: 12px; padding: 8px; text-align: center; }
 .tl-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .tl-step { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
@@ -147,7 +147,7 @@ body.rich-mode .rich-editor {
 .tl-sec { font-size: 12px; font-weight: 600; color: var(--fg); margin: 0 0 6px; }
 .tl-lib { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tl-lib-row { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
-.tl-lib-thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; flex: none; background: #000; }
+.tl-lib-thumb { width: 44px; height: 25px; object-fit: contain; border-radius: 4px; flex: none; background: #000; } /* 16:9 thumb, contain = show the real framing */
 .tl-lib-name { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-lib-dur { font-size: 11px; white-space: nowrap; }
 .tl-lib-use { font-size: 11px; white-space: nowrap; min-width: 48px; text-align: right; }
