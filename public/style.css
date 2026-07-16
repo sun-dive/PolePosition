@@ -152,6 +152,11 @@ body.rich-mode .rich-editor {
 .tl-lib-dur { font-size: 11px; white-space: nowrap; }
 .tl-lib-use { font-size: 11px; white-space: nowrap; min-width: 48px; text-align: right; }
 .tl-lib-del { line-height: 1; padding: 2px 8px; }
+/* Music-video timeline: two-column layout (scenes | timeline) for desktop; each list scrolls on its own */
+.tl-cols { display: flex; gap: 16px; align-items: flex-start; }
+.tl-col { flex: 1 1 0; min-width: 0; }
+.tl-col .tl-lib, .tl-col .tl-list { max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+@media (max-width: 760px) { .tl-cols { flex-direction: column; } .tl-col .tl-lib, .tl-col .tl-list { max-height: 38vh; } }
 #btnCover.has-cover { border-color: var(--accent); color: var(--fg); }
 
 @media (max-width: 860px) {
