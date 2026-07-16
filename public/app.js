@@ -1050,6 +1050,9 @@ $('tlLoadCue').onchange = () => { const f = $('tlLoadCue').files[0]; if (f) load
 $('tlAudio').onchange = () => setSong($('tlAudio').files[0])
 $('tlPlayer').addEventListener('timeupdate', updateTlPreview)
 $('tlPlayer').addEventListener('seeked', updateTlPreview)
+// The first clip is already on screen when you hit play, so updateTlPreview would skip it (same placement).
+// Reset the tracker on play so the current clip restarts from frame 0 too — fixes the first clip not resyncing.
+$('tlPlayer').addEventListener('play', () => { tlCurrentT = null; updateTlPreview() })
 
 /* ---- Lyrics timeline → .lrc (tap along to the song to time each line) ---- */
 let lyAudioUrl = '', lyCursor = 0
