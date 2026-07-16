@@ -694,13 +694,19 @@ function parseLrcTime (str) {
 
 /* --- ① Scene library --- */
 async function addLibFiles (files) {
+  let added = 0; const skipped = []
   for (const f of files) {
-    if (tlLib.has(f.name)) continue // already in the library — stored once
+    if (tlLib.has(f.name)) { skipped.push(f.name); continue } // already in the library — stored once (by filename)
     const entry = { file: f, url: URL.createObjectURL(f), dur: '' }
-    tlLib.set(f.name, entry)
+    tlLib.set(f.name, entry); added++
     try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) entry.dur = (ms / 1000).toFixed(1) + 's' } catch { /* not animated */ }
   }
   renderLib(); refreshSceneSelects(); saveTimelineSoon()
+  if (skipped.length) { // don't skip silently — tell the user why nothing was added
+    $('tlStatus').textContent = added
+      ? `Added ${added}. Skipped ${skipped.length} already in the library: ${skipped.join(', ')}.`
+      : `“${skipped.join(', ')}” — already in the library (clips are stored once). To use a clip again, place it with “+ Add to timeline”. If it's a different clip with the same name, rename it first.`
+  } else if (added) { $('tlStatus').textContent = `Added ${added} scene clip${added === 1 ? '' : 's'}.` }
 }
 function usageCount (name) { return Array.from($('tlList').children).filter(li => li.querySelector('.tl-scene').value === name).length }
 function renderLib () {
