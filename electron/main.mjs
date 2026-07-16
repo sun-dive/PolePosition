@@ -83,6 +83,7 @@ function createWindow (port) {
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   })
   void win.loadURL(`http://127.0.0.1:${port}`)
+  if (process.env.PP_DEVTOOLS) win.webContents.openDevTools({ mode: 'right' }) // set PP_DEVTOOLS=1 to auto-open the console
   win.webContents.setWindowOpenHandler(({ url }) => {
     // The PDF export opens a blank window and writes the print view into it — let Electron create that window.
     // (Denying it and shell-opening the URL is what caused "Could not read file about:blank".)

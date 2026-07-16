@@ -147,7 +147,7 @@ body.rich-mode .rich-editor {
 .tl-sec { font-size: 12px; font-weight: 600; color: var(--fg); margin: 0 0 6px; }
 .tl-lib { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tl-lib-row { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
-.tl-lib-thumb { width: 44px; height: 25px; object-fit: contain; border-radius: 4px; flex: none; background: #000; } /* 16:9 thumb, contain = show the real framing */
+.tl-lib-thumb { width: 88px; height: 50px; object-fit: contain; border-radius: 4px; flex: none; background: #000; } /* 16:9 thumb (2×), contain = show the real framing — big enough to tell clips apart */
 .tl-lib-name { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-lib-dur { font-size: 11px; white-space: nowrap; }
 .tl-lib-use { font-size: 11px; white-space: nowrap; min-width: 48px; text-align: right; }

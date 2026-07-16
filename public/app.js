@@ -694,38 +694,41 @@ function parseLrcTime (str) {
 
 /* --- ① Scene library --- */
 async function addLibFiles (files) {
-  let added = 0; const skipped = []
+  let added = 0, refreshed = 0
   for (const f of files) {
-    if (tlLib.has(f.name)) { skipped.push(f.name); continue } // already in the library — stored once (by filename)
+    const existing = tlLib.get(f.name) // same filename already present → refresh it (re-adding a removed/updated clip must always work)
+    if (existing) { try { URL.revokeObjectURL(existing.url) } catch {} mvPersisted.delete('clip:' + f.name); refreshed++ } else added++
     const entry = { file: f, url: URL.createObjectURL(f), dur: '' }
-    tlLib.set(f.name, entry); added++
+    tlLib.set(f.name, entry) // one entry per filename (stored once); re-adding overwrites rather than duplicating
     try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) entry.dur = (ms / 1000).toFixed(1) + 's' } catch { /* not animated */ }
   }
   renderLib(); refreshSceneSelects(); saveTimelineSoon()
-  if (skipped.length) { // don't skip silently — tell the user why nothing was added
-    $('tlStatus').textContent = added
-      ? `Added ${added}. Skipped ${skipped.length} already in the library: ${skipped.join(', ')}.`
-      : `“${skipped.join(', ')}” — already in the library (clips are stored once). To use a clip again, place it with “+ Add to timeline”. If it's a different clip with the same name, rename it first.`
-  } else if (added) { $('tlStatus').textContent = `Added ${added} scene clip${added === 1 ? '' : 's'}.` }
+  const parts = []
+  if (added) parts.push(`Added ${added} scene clip${added === 1 ? '' : 's'}`)
+  if (refreshed) parts.push(`refreshed ${refreshed} already in the library`)
+  if (parts.length) $('tlStatus').textContent = parts.join(', ') + '.'
 }
-function usageCount (name) { return Array.from($('tlList').children).filter(li => li.querySelector('.tl-scene').value === name).length }
+function usageCount (name) { return Array.from($('tlList').children).filter(li => { const s = li.querySelector('.tl-scene'); return s && s.value === name }).length }
 function renderLib () {
   const ul = $('tlLib'); ul.textContent = ''
   if (tlLib.size === 0) { const li = document.createElement('li'); li.className = 'dim'; li.style.fontSize = '12px'; li.textContent = 'No scene clips yet — add WebP/GIF clips below.'; ul.append(li); return }
   for (const [name, e] of tlLib) {
-    const li = document.createElement('li'); li.className = 'tl-lib-row'
-    const img = document.createElement('img'); img.className = 'tl-lib-thumb'; img.src = e.url
-    const nm = document.createElement('span'); nm.className = 'tl-lib-name'; nm.textContent = name; nm.title = name
-    const du = document.createElement('span'); du.className = 'tl-lib-dur dim'; du.textContent = e.dur
-    const n = usageCount(name)
-    const use = document.createElement('span'); use.className = 'tl-lib-use dim'; use.textContent = n ? ('used ×' + n) : 'unused'
-    const del = document.createElement('button'); del.className = 'ghost tl-lib-del'; del.type = 'button'; del.textContent = '✕'; del.title = 'Remove clip + its timeline placements'
-    del.onclick = () => {
-      URL.revokeObjectURL(e.url); tlLib.delete(name)
-      Array.from($('tlList').children).forEach(li2 => { if (li2.querySelector('.tl-scene').value === name) li2.remove() })
-      renumberTl(); renderLib(); refreshSceneSelects(); updateTlPreview(); saveTimelineSoon()
-    }
-    li.append(img, nm, du, use, del); ul.append(li)
+    try {
+      const li = document.createElement('li'); li.className = 'tl-lib-row'
+      const img = document.createElement('img'); img.className = 'tl-lib-thumb'; if (e && e.url) img.src = e.url
+      const nm = document.createElement('span'); nm.className = 'tl-lib-name'; nm.textContent = name; nm.title = name
+      const du = document.createElement('span'); du.className = 'tl-lib-dur dim'; du.textContent = (e && e.dur) || ''
+      const n = usageCount(name)
+      const use = document.createElement('span'); use.className = 'tl-lib-use dim'; use.textContent = n ? ('used ×' + n) : 'unused'
+      const del = document.createElement('button'); del.className = 'ghost tl-lib-del'; del.type = 'button'; del.textContent = '✕'; del.title = 'Remove clip + its timeline placements'
+      del.onclick = () => {
+        tlLib.delete(name) // remove from the library FIRST, so it always takes even if a later step throws
+        try { if (e && e.url) URL.revokeObjectURL(e.url) } catch {}
+        Array.from($('tlList').children).forEach(li2 => { const s = li2.querySelector('.tl-scene'); if (s && s.value === name) li2.remove() })
+        renumberTl(); renderLib(); refreshSceneSelects(); updateTlPreview(); saveTimelineSoon()
+      }
+      li.append(img, nm, du, use, del); ul.append(li)
+    } catch { /* one bad entry must not hide the rest of the library */ }
   }
 }
 
@@ -737,7 +740,8 @@ function sceneSelect (selected) {
 }
 function refreshSceneSelects () { // rebuild each placement's dropdown to reflect the current library, keeping its pick
   for (const li of Array.from($('tlList').children)) {
-    const old = li.querySelector('.tl-scene'); const fresh = sceneSelect(old.value); fresh.onchange = old.onchange
+    const old = li.querySelector('.tl-scene'); if (!old) continue
+    const fresh = sceneSelect(old.value); fresh.onchange = old.onchange
     old.replaceWith(fresh)
   }
 }
@@ -782,7 +786,7 @@ function addTlRow (presetName, presetTime) { // presets supplied when restoring 
 }
 function tlPlacements () {
   return Array.from($('tlList').children)
-    .map(li => ({ t: parseLrcTime(li.querySelector('.tl-time').value), name: li.querySelector('.tl-scene').value }))
+    .map(li => { const tm = li.querySelector('.tl-time'), sc = li.querySelector('.tl-scene'); return { t: tm ? parseLrcTime(tm.value) : null, name: sc ? sc.value : '' } })
     .filter(s => s.t != null && s.name && tlLib.has(s.name))
     .map(s => ({ t: s.t, name: s.name, url: tlLib.get(s.name).url }))
     .sort((a, b) => a.t - b.t)
