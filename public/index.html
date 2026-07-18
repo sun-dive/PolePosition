@@ -226,7 +226,17 @@
           <button id="tlAdd" class="ghost" type="button">+ Add to timeline</button>
         </div>
       </div>
-      <div class="row" style="margin-top:12px; gap:8px; align-items:center; flex-wrap:wrap">
+      <div class="row" style="margin-top:12px; gap:10px; align-items:flex-end; flex-wrap:wrap">
+        <label class="dim seq-exp-lab">Reuse license<select id="tlLicense">
+          <option value="CC BY 4.0">CC BY 4.0 — free reuse, with attribution</option>
+          <option value="CC BY-SA 4.0">CC BY-SA 4.0 — reuse + share-alike</option>
+          <option value="CC BY-NC 4.0">CC BY-NC 4.0 — non-commercial, attribution</option>
+          <option value="CC0 1.0">CC0 — public domain, no attribution</option>
+          <option value="All rights reserved">All rights reserved</option>
+        </select></label>
+        <label class="dim seq-exp-lab" style="flex:1 1 200px">Attribute to<input id="tlAttribution" type="text" placeholder="e.g. Evidnus" autocomplete="off" /></label>
+      </div>
+      <div class="row" style="margin-top:10px; gap:8px; align-items:center; flex-wrap:wrap">
         <button id="tlBundle" class="ai-btn" type="button">⬇ Download bundle (.zip)</button>
         <label class="dim" style="font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:4px" title="Transcode PNG/JPEG stills to WebP when packing the bundle — big space saving, rides smaller on-chain. Animated WebP/GIF clips are left untouched."><input id="tlWebp" type="checkbox" checked style="margin:0"> stills→WebP</label>
         <button id="tlDownload" class="ghost" type="button">cue only</button>

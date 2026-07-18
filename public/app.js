@@ -997,9 +997,16 @@ function updateTlPreview () {
   if (img.getAttribute('src') === cur.url) { img.src = ''; requestAnimationFrame(() => { img.src = cur.url }) }
   else img.src = cur.url
 }
+const bmfLicense = () => ($('tlLicense') ? $('tlLicense').value.trim() : '')
+const bmfAttribution = () => ($('tlAttribution') ? $('tlAttribution').value.trim() : '')
 function cueText () {
   const scenes = tlPlacements()
-  return scenes.length ? scenes.map(s => '[' + fmtLrc(s.t) + ']' + s.name).join('\n') + '\n' : ''
+  if (!scenes.length) return ''
+  let head = ''
+  const lic = bmfLicense(), attr = bmfAttribution()
+  if (lic) head += '# license: ' + lic + '\n'
+  if (attr) head += '# attribution: ' + attr + '\n'
+  return head + scenes.map(s => '[' + fmtLrc(s.t) + ']' + s.name).join('\n') + '\n'
 }
 function triggerDownload (blob, filename) {
   const url = URL.createObjectURL(blob)
@@ -1026,6 +1033,9 @@ function downloadBmf () {
     return s
   })
   const manifest = { bmf: 0 }
+  const lic = bmfLicense(), attr = bmfAttribution()
+  if (lic) manifest.license = lic
+  if (attr) manifest.attribution = attr
   if (tlAudioFile) { manifest.audio = {}; if (/^[0-9a-f]{64}$/i.test(tlAudioTx)) manifest.audio.tx = tlAudioTx.toLowerCase(); manifest.audio.name = tlAudioFile.name }
   manifest.scenes = scenes
   const base = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
@@ -1221,7 +1231,7 @@ async function saveTimelineState () {
       want.add('song')
       if (mvSongName !== tlAudioFile.name) { await mvPut('song', tlAudioFile); mvSongName = tlAudioFile.name }
     }
-    await mvPut('meta', { clips, songName: tlAudioFile ? tlAudioFile.name : '', audioTx: tlAudioTx, cue: cueText() })
+    await mvPut('meta', { clips, songName: tlAudioFile ? tlAudioFile.name : '', audioTx: tlAudioTx, license: bmfLicense(), attribution: bmfAttribution(), cue: cueText() })
     for (const k of Array.from(mvPersisted)) if (!want.has(k)) { await mvDel(k); mvPersisted.delete(k) } // prune removed clips
     if (!tlAudioFile && mvSongName) { await mvDel('song'); mvSongName = '' }
   } catch { /* best-effort autosave — never block editing */ }
@@ -1241,6 +1251,8 @@ async function restoreTimelineState () {
     if (files.length) await addLibFiles(files)
     for (const c of (meta.clips || [])) { const e = tlLib.get(c.name); if (e && c.tx) e.tx = c.tx } // reapply saved txids
     if (meta.audioTx) { tlAudioTx = meta.audioTx; const el = $('tlAudioTx'); if (el) el.value = tlAudioTx }
+    if (meta.license && $('tlLicense')) $('tlLicense').value = meta.license
+    if (meta.attribution && $('tlAttribution')) $('tlAttribution').value = meta.attribution
     if (meta.songName) { const s = await mvGet('song'); if (s) { setSong(new File([s], meta.songName, { type: mimeFromName(meta.songName) })); mvSongName = meta.songName } }
     if (meta.cue) importCueText(meta.cue)
     renderLib(); updateTlPreview()
@@ -1341,6 +1353,8 @@ $('tlAdd').onclick = () => addTlRow()
 $('tlDownload').onclick = downloadCue
 $('tlBmf').onclick = downloadBmf
 $('tlAudioTx').oninput = () => { tlAudioTx = $('tlAudioTx').value.trim(); $('tlAudioTx').classList.toggle('ok', /^[0-9a-f]{64}$/i.test(tlAudioTx)); saveTimelineSoon() }
+$('tlLicense').onchange = saveTimelineSoon
+$('tlAttribution').oninput = saveTimelineSoon
 $('tlClear').onclick = clearAllTimeline
 $('tlBundle').onclick = downloadBundle
 $('tlLoadBundle').onchange = () => { const f = $('tlLoadBundle').files[0]; if (f) loadBundleFile(f); $('tlLoadBundle').value = '' }
