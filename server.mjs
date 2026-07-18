@@ -488,13 +488,15 @@ const server = createServer(async (req, res) => {
       const fpsReq = Number(url.searchParams.get('fps'))
       const fps = [5, 7, 15].includes(fpsReq) ? fpsReq : 15
       const width = Math.min(Math.max(Number(url.searchParams.get('width')) || 480, 96), 1024)
-      const q = Math.min(Math.max(Number(url.searchParams.get('q')) || 55, 1), 100)
+      const qParam = url.searchParams.get('q'), lossless = qParam === 'lossless'
+      const q = Math.min(Math.max(Number(qParam) || 55, 1), 100)
       const W = Math.round(width / 2) * 2
       const H = aspect === '1:1' ? W : Math.round((W * 9 / 16) / 2) * 2
       // cover-crop: scale up to fill WxH (keeping the source aspect), then centre-crop to exactly WxH — robust
       // for any input shape (16:9 in → no crop; other shapes → trimmed to the chosen frame), then drop the fps.
       const vf = `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`
-      await runFfmpeg(['-y', '-i', inPath, '-vcodec', 'libwebp', '-vf', vf, '-loop', '0', '-lossless', '0', '-q:v', String(q), '-compression_level', '6', '-an', outPath])
+      const encArgs = lossless ? ['-lossless', '1', '-q:v', '100'] : ['-lossless', '0', '-q:v', String(q)]
+      await runFfmpeg(['-y', '-i', inPath, '-vcodec', 'libwebp', '-vf', vf, '-loop', '0', ...encArgs, '-compression_level', '6', '-an', outPath])
       const out = await readFile(outPath)
       let frames = 0
       try { frames = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).length } catch { /* leave 0 */ }
