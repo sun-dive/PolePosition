@@ -530,11 +530,19 @@ async function renderTimeline ({ clips, placements, audioPath, durationSec, widt
   await mkdir(framesRoot, { recursive: true })
   const out = workBase + '.' + (format === 'mp4' ? 'mp4' : 'webp')
   try {
-    // Write each distinct clip to a temp file; pick the output canvas from the first placement's clip.
+    // Resolve each distinct clip to a file path: a raw-uploaded temp (preferred — no size cap) or, as a
+    // fallback, base64 written to a temp. Uploaded temps are cleaned up by the endpoint, not here.
     const clipPaths = new Map()
     for (const c of clips) {
-      const p = workBase + '-in-' + (slug(c.name, 20) || 'clip') + '-' + Math.random().toString(36).slice(2, 6) + '.webp'
-      await writeFile(p, Buffer.from(c.data, 'base64')); clipPaths.set(c.name, p); created.push(p)
+      if (typeof c.file === 'string') {
+        const bn = c.file.replace(/[^a-z0-9._-]/gi, '')
+        const ap = join(tmpdir(), bn)
+        if (bn.startsWith('pp-rclip-') && existsSync(ap)) { clipPaths.set(c.name, ap); continue }
+      }
+      if (typeof c.data === 'string') {
+        const p = workBase + '-in-' + (slug(c.name, 20) || 'clip') + '-' + Math.random().toString(36).slice(2, 6) + '.webp'
+        await writeFile(p, Buffer.from(c.data, 'base64')); clipPaths.set(c.name, p); created.push(p)
+      }
     }
     let W, H
     if (width && height) {
@@ -809,10 +817,20 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, { audioFile: name })
     } catch (e) { return sendJson(res, 502, { error: e.message || 'audio upload failed' }) }
   }
+  // Raw clip upload — clips are referenced by file (not base64 in JSON), so any number of full-res clips is fine.
+  if (url.pathname === '/api/render-clip' && req.method === 'POST') {
+    try {
+      const ext = (url.searchParams.get('ext') || 'webp').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'webp'
+      const buf = await readRawBody(req, 400e6)
+      const name = 'pp-rclip-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + '.' + ext
+      await writeFile(join(tmpdir(), name), buf)
+      return sendJson(res, 200, { file: name })
+    } catch (e) { return sendJson(res, 502, { error: e.message || 'clip upload failed' }) }
+  }
   if (url.pathname === '/api/render-timeline' && req.method === 'POST') {
     let body
     try { body = await readJson(req) } catch (e) { return sendJson(res, 400, { error: 'bad request body (' + e.message + ')' }) }
-    const clips = Array.isArray(body.clips) ? body.clips.filter(c => c && c.name && typeof c.data === 'string') : []
+    const clips = Array.isArray(body.clips) ? body.clips.filter(c => c && c.name && (typeof c.file === 'string' || typeof c.data === 'string')) : []
     const placements = Array.isArray(body.placements) ? body.placements : []
     if (!clips.length || !placements.length) return sendJson(res, 400, { error: 'Need at least one clip and one timeline placement.' })
     const format = body.format === 'webp' ? 'webp' : 'mp4'
@@ -833,14 +851,17 @@ const server = createServer(async (req, res) => {
       const bn = body.audioFile.replace(/[^a-z0-9._-]/gi, '')
       if (bn.startsWith('pp-raudio-')) { const ap = join(tmpdir(), bn); if (existsSync(ap)) audioPath = ap }
     }
+    // Uploaded clip temps to delete once the render is done (whatever the outcome).
+    const clipTemps = clips.filter(c => typeof c.file === 'string' && c.file.replace(/[^a-z0-9._-]/gi, '').startsWith('pp-rclip-')).map(c => join(tmpdir(), c.file.replace(/[^a-z0-9._-]/gi, '')))
+    const cleanTemps = async () => { if (audioPath) await unlink(audioPath).catch(() => {}); for (const p of clipTemps) await unlink(p).catch(() => {}) }
     let outPath
     try {
       outPath = await renderTimeline({ clips, placements, audioPath, durationSec, width, height, fps, quality, lossless, format })
     } catch (e) {
-      if (audioPath) await unlink(audioPath).catch(() => {})
+      await cleanTemps()
       return sendJson(res, 502, { error: e.message || 'render failed' })
     }
-    if (audioPath) await unlink(audioPath).catch(() => {})
+    await cleanTemps()
     if (outDir) {
       // Save straight into the chosen folder and remember it as the default for next time.
       try {

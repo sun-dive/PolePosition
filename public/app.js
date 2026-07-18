@@ -1251,7 +1251,6 @@ function fillTlRender () {
   const nameEl = $('tlRName')
   if (!nameEl.value) nameEl.value = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
 }
-const fileToB64 = file => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).slice(String(r.result).indexOf(',') + 1)); r.onerror = rej; r.readAsDataURL(file) })
 async function renderTimelineExport () {
   const placements = tlPlacements()
   if (!placements.length) { $('tlRStatus').textContent = 'Add at least one timeline placement first.'; return }
@@ -1265,9 +1264,16 @@ async function renderTimelineExport () {
   const filename = $('tlRName').value.trim()
   $('tlRGo').disabled = true
   try {
-    $('tlRStatus').textContent = 'Packing clips…'
-    const clips = []
-    for (const [name, e] of tlLib) clips.push({ name, data: await fileToB64(e.file) })
+    // Upload each distinct clip as a raw file (not base64 in JSON) → no request-size cap, no bloat.
+    const clips = []; let ci = 0
+    for (const [name, e] of tlLib) {
+      $('tlRStatus').textContent = `Uploading clips… (${++ci}/${tlLib.size})`
+      const ext = (name.split('.').pop() || 'webp').toLowerCase()
+      const cr = await fetch('/api/render-clip?ext=' + encodeURIComponent(ext), { method: 'POST', body: e.file })
+      const cj = await cr.json().catch(() => ({}))
+      if (!cr.ok || !cj.file) { $('tlRStatus').textContent = cj.error || 'Clip upload failed.'; return }
+      clips.push({ name, file: cj.file })
+    }
     let audioFile = null
     let durationSec = (isFinite($('tlPlayer').duration) && $('tlPlayer').duration > 0) ? $('tlPlayer').duration : 0
     if (format === 'mp4' && tlAudioFile) {
