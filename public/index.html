@@ -9,7 +9,9 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">🏁 <b>Pole&nbsp;Position</b> <span class="dim">— write it, illustrate it, mint it.</span></div>
+    <div class="brand">🏁 <b>Pole&nbsp;Position</b>
+      <button id="ppProject" class="pp-project" type="button" title="Project — the masters folder where every fal.ai original is archived">📁 <span id="ppProjectName">No project</span></button>
+    </div>
     <div class="actions">
       <span id="wordcount" class="dim"></span>
       <button id="btnUndo" class="ghost" type="button" title="Undo (Ctrl/Cmd+Z)" disabled>↶ Undo</button>
@@ -137,6 +139,24 @@
   </div>
 
   <!-- (Book-cover modal removed — merged into the single #artModal “Art” tool below.) -->
+
+  <div id="projectModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:540px">
+      <div class="modal-head"><b>📁 Project</b><button id="projClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 12px">A project's <b>masters folder</b> archives every fal.ai original — full-resolution images &amp; videos — the moment it's generated, used or not. That keeps your highest-res source safe; downscaling stays a deliberate step (native-res for YouTube, byte-efficient for on-chain).</p>
+      <div id="projRecentWrap" hidden style="margin-bottom:16px">
+        <div class="seq-col-h">Recent projects</div>
+        <ul id="projRecent" class="proj-recent"></ul>
+      </div>
+      <div class="seq-col-h">New project</div>
+      <label class="proj-field">Name<input id="projName" type="text" placeholder="e.g. Supersonic" autocomplete="off" /></label>
+      <label class="proj-field">Masters folder<input id="projDir" type="text" placeholder="~/PolePosition/<name>-masters" autocomplete="off" spellcheck="false" /></label>
+      <div class="row" style="gap:8px; align-items:center; margin-top:12px">
+        <button id="projCreate" class="ai-btn" type="button">Create / switch</button>
+        <span id="projStatus" class="dim" style="font-size:12px"></span>
+      </div>
+    </div>
+  </div>
 
   <div id="seqModal" class="modal" hidden>
     <div class="modal-box seq-box">

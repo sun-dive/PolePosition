@@ -724,6 +724,78 @@ $('seqAdd').onclick = addSeqStep
 $('seqBuild').onclick = buildSequenceClips
 $('seqDownload').onclick = downloadSeq
 
+/* ---- Project: name + masters folder (archives every fal.ai original, full-res) ----
+   A project is tiny for now — a name and a masters folder. The server saves every generated image/video
+   original into that folder as it's created; the chip in the header shows which project is active. */
+let ppCurrent = null // { name, mastersDir }
+let ppHome = ''
+const slugify = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48)
+// Suffix for a status line telling whether the fal.ai original was archived to the masters folder.
+function masterNote (m) { return m ? ' · master saved ✓' : (ppCurrent ? ' · ⚠ master save failed' : ' · ⚠ no project — original not archived') }
+function renderProject (data) {
+  ppCurrent = data.current || null
+  if (typeof data.home === 'string') ppHome = data.home
+  const chip = $('ppProject'), nameEl = $('ppProjectName')
+  nameEl.textContent = ppCurrent ? ppCurrent.name : 'No project'
+  chip.classList.toggle('no-project', !ppCurrent)
+  chip.title = ppCurrent ? ('Masters → ' + ppCurrent.mastersDir) : 'No project — click to create one'
+  const recent = Array.isArray(data.recent) ? data.recent : []
+  const wrap = $('projRecentWrap'), list = $('projRecent')
+  list.innerHTML = ''
+  if (recent.length) {
+    wrap.hidden = false
+    for (const p of recent) {
+      const li = document.createElement('li')
+      if (ppCurrent && p.name === ppCurrent.name) li.className = 'active'
+      li.innerHTML = '<span class="pr-name"></span><span class="pr-dir"></span>'
+      li.querySelector('.pr-name').textContent = p.name
+      li.querySelector('.pr-dir').textContent = p.mastersDir
+      li.onclick = () => openProject(p.name)
+      list.appendChild(li)
+    }
+  } else wrap.hidden = true
+}
+async function loadProject (autoprompt) {
+  try {
+    const r = await fetch('/api/project'); const data = await r.json()
+    renderProject(data)
+    if (autoprompt && !data.current) openProjectModal() // require a project on first run
+  } catch { /* server may not be up yet */ }
+}
+function openProjectModal () {
+  $('projStatus').textContent = ''
+  if (!$('projName').value && !ppCurrent) $('projName').value = ''
+  $('projectModal').hidden = false
+  setTimeout(() => $('projName').focus(), 30)
+}
+async function createProject () {
+  const name = $('projName').value.trim()
+  if (!name) { $('projStatus').textContent = 'Enter a project name.'; $('projName').focus(); return }
+  $('projStatus').textContent = 'Creating…'
+  try {
+    const r = await fetch('/api/project/new', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, mastersDir: $('projDir').value.trim() }) })
+    const data = await r.json()
+    if (!r.ok) { $('projStatus').textContent = data.error || ('Error ' + r.status); return }
+    renderProject(data); $('projStatus').textContent = ''
+    $('projectModal').hidden = true; flash('Project “' + name + '” — masters → ' + (data.current?.mastersDir || ''))
+  } catch (e) { $('projStatus').textContent = 'Failed: ' + e.message }
+}
+async function openProject (name) {
+  try {
+    const r = await fetch('/api/project/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })
+    const data = await r.json()
+    if (!r.ok) { $('projStatus').textContent = data.error || ('Error ' + r.status); return }
+    renderProject(data); $('projectModal').hidden = true; flash('Project “' + name + '”')
+  } catch (e) { $('projStatus').textContent = 'Failed: ' + e.message }
+}
+$('ppProject').onclick = openProjectModal
+$('projClose').onclick = () => { $('projectModal').hidden = true }
+$('projectModal').addEventListener('click', e => { if (e.target === $('projectModal')) $('projectModal').hidden = true })
+$('projCreate').onclick = createProject
+$('projName').addEventListener('input', () => { $('projDir').placeholder = '~/PolePosition/' + (slugify($('projName').value) || '<name>') + '-masters' })
+$('projName').addEventListener('keydown', e => { if (e.key === 'Enter') createProject() })
+loadProject(true)
+
 /* ---- Music-video scene timeline → bundle (scenes + song + video.cue) for the PharLap player ----
    Two sections: ① a scene LIBRARY (each clip stored once) and ② a TIMELINE of placements (reuse clips freely).
    This mirrors the on-chain cost model — a clip placed at 5 times is one file + 5 short cue lines. */
@@ -1642,7 +1714,7 @@ async function generateArt () {
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artStatus').textContent = data.error || ('Error ' + r.status); return }
     artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl)
-    $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = crop ? 'Done (A4) — insert, refine, or regenerate.' : (px ? `Done (${px}×${px}) — insert, refine, or regenerate.` : 'Done — insert, refine, or regenerate.')
+    $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = (crop ? 'Done (A4) — insert, refine, or regenerate.' : (px ? `Done (${px}×${px}) — insert, refine, or regenerate.` : 'Done — insert, refine, or regenerate.')) + masterNote(data.master)
   } catch (e) { $('artStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artGen').disabled = false }
 }
@@ -1656,7 +1728,7 @@ async function editArt () {
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artEditStatus').textContent = data.error || ('Error ' + r.status); return }
     { const { px, crop } = parseShape($('artAspect').value); artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl) }
-    $('artImg').src = artData; $('artEditStatus').textContent = 'Edited — insert, or tweak the instruction and refine again.' // keep the instruction so you can re-run/tweak it
+    $('artImg').src = artData; $('artEditStatus').textContent = 'Edited — insert, or tweak the instruction and refine again.' + masterNote(data.master) // keep the instruction so you can re-run/tweak it
   } catch (e) { $('artEditStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artEdit').disabled = false }
 }
@@ -1716,7 +1788,7 @@ async function animateArt () {
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artAnimStatus').textContent = data.error || ('Error ' + r.status); return }
     artAnimData = data.dataUrl; $('artAnimImg').src = artAnimData; $('artAnimResult').hidden = false
-    $('artAnimStatus').textContent = 'Done (' + (data.ext || 'webp') + ') — download it for an animated cover / FLAC art.'
+    $('artAnimStatus').textContent = 'Done (' + (data.ext || 'webp') + ', native res) — download for an animated cover; shrink on export.' + masterNote(data.master)
   } catch (e) { $('artAnimStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artAnimate').disabled = false }
 }
@@ -1887,7 +1959,7 @@ $('mergeGo').onclick = async () => {
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('mergeStatus').textContent = data.error || ('Error ' + r.status); return }
     artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl)
-    $('artImg').src = artData; $('artResult').hidden = false; $('mergeStatus').textContent = 'Merged — refine, crop, download, insert or animate below.'
+    $('artImg').src = artData; $('artResult').hidden = false; $('mergeStatus').textContent = 'Merged — refine, crop, download, insert or animate below.' + masterNote(data.master)
   } catch (e) { $('mergeStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('mergeGo').disabled = false }
 }

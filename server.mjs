@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildEpub } from './epub.mjs'
 import { spawn } from 'node:child_process'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { unlink, readdir, rm } from 'node:fs/promises'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
@@ -30,6 +30,50 @@ function loadEnv () {
   }
 }
 loadEnv()
+
+// ── Projects ─────────────────────────────────────────────────────────────────────────────────────
+// A project is deliberately tiny for now: just a name + a "masters" folder. The masters folder is where
+// EVERY fal.ai original (full-res images + videos) is archived at generation time, even if never used in
+// the final piece — so the highest-resolution source is always kept and downscaling is a later, deliberate
+// choice (native-res YouTube export vs a byte-efficient on-chain mint). Registry lives outside the repo.
+const PP_DIR = join(homedir(), '.poleposition')
+const PROJECTS_FILE = join(PP_DIR, 'projects.json')
+let CURRENT = null // { name, mastersDir }
+let RECENT = []    // [{ name, mastersDir, opened }]  most-recent first
+const slug = (s, n = 48) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, n)
+function loadProjectsState () {
+  try {
+    if (!existsSync(PROJECTS_FILE)) return
+    const s = JSON.parse(readFileSync(PROJECTS_FILE, 'utf8'))
+    RECENT = Array.isArray(s.recent) ? s.recent.filter(p => p && p.name && p.mastersDir) : []
+    if (s.current) { const c = RECENT.find(p => p.name === s.current); if (c) CURRENT = { name: c.name, mastersDir: c.mastersDir } }
+  } catch (e) { console.warn('  ⚠️  projects.json unreadable — starting fresh:', e.message) }
+}
+async function persistProjects () {
+  try { await mkdir(PP_DIR, { recursive: true }); await writeFile(PROJECTS_FILE, JSON.stringify({ current: CURRENT?.name || null, recent: RECENT }, null, 2)) }
+  catch (e) { console.warn('  ⚠️  could not save projects.json:', e.message) }
+}
+// Expand a leading ~ and fall back to ~/PolePosition/<slug>-masters when no folder is given.
+function resolveMastersDir (name, dir) {
+  dir = String(dir || '').trim()
+  if (dir.startsWith('~')) dir = join(homedir(), dir.slice(1).replace(/^[/\\]+/, ''))
+  if (!dir) dir = join(homedir(), 'PolePosition', (slug(name) || 'project') + '-masters')
+  return dir
+}
+// Archive a fal.ai original into the current project's masters folder. No-op (returns null) with no project.
+async function saveMaster (kind, buf, ext, hint) {
+  if (!CURRENT?.mastersDir) return null
+  try {
+    await mkdir(CURRENT.mastersDir, { recursive: true })
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
+    const h = slug(hint, 32)
+    const name = kind + '-' + ts + (h ? '-' + h : '') + '.' + ext
+    const p = join(CURRENT.mastersDir, name)
+    await writeFile(p, buf)
+    return p
+  } catch (e) { console.warn('  ⚠️  could not save master:', e.message); return null }
+}
+loadProjectsState()
 
 // HARD GUARD: never let an Anthropic API key reach the SDK — it would override the subscription and bill
 // per-token. If one is set (shell or .env), drop it so writing always bills against your Claude plan.
@@ -183,7 +227,9 @@ async function falImage ({ prompt, model, aspectRatio, width, height, imageUrls 
   const imgRes = await fetch(img.url)
   const buf = Buffer.from(await imgRes.arrayBuffer())
   const ct = img.content_type || imgRes.headers.get('content-type') || 'image/jpeg'
-  return 'data:' + ct + ';base64,' + buf.toString('base64')
+  const ext = /png/.test(ct) ? 'png' : /webp/.test(ct) ? 'webp' : 'jpg'
+  const master = await saveMaster('img', buf, ext, prompt) // archive the full-res original, used or not
+  return { dataUrl: 'data:' + ct + ';base64,' + buf.toString('base64'), master }
 }
 
 // "Animate cover": send a still image to a fal IMAGE-TO-VIDEO model → get a short MP4 back (downloaded here).
@@ -211,7 +257,9 @@ async function falImageToVideo ({ image, prompt }) {
   const vurl = data && data.video && data.video.url
   if (!vurl) throw new Error('fal.ai returned no video — is FAL_VIDEO_MODEL an image-to-video model?')
   const vidRes = await fetch(vurl)
-  return Buffer.from(await vidRes.arrayBuffer())
+  const buf = Buffer.from(await vidRes.arrayBuffer())
+  const master = await saveMaster('vid', buf, 'mp4', prompt) // archive the full-res MP4 — the true master
+  return { buffer: buf, master }
 }
 
 // Run ffmpeg with the given args; rejects with stderr tail on failure (or a clear message if ffmpeg is missing).
@@ -225,23 +273,23 @@ function runFfmpeg (args) {
   })
 }
 
-// MP4 → animated image data URL for an `<img>` cover: prefer animated WebP (small); fall back to GIF if this
-// ffmpeg lacks libwebp. Kept short/low-res so it's small enough to embed + ride on-chain.
+// MP4 → animated image data URL for an `<img>` preview: prefer animated WebP; fall back to GIF if this ffmpeg
+// lacks libwebp. NO forced downscale — native resolution + frame rate are kept (the full-res MP4 is archived
+// as the master, and any shrink is a deliberate later step: Video→WebP, per-clip fps, or an export size).
 async function mp4ToAnimatedImage (mp4Buffer) {
   const base = join(tmpdir(), 'pp-anim-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
   const mp4 = base + '.mp4'
   await writeFile(mp4, mp4Buffer)
-  const vf = 'fps=15,scale=512:-1:flags=lanczos'
   try {
     try {
       const webp = base + '.webp'
-      await runFfmpeg(['-y', '-i', mp4, '-vcodec', 'libwebp', '-filter:v', vf, '-loop', '0', '-lossless', '0', '-q:v', '70', '-an', webp])
+      await runFfmpeg(['-y', '-i', mp4, '-vcodec', 'libwebp', '-loop', '0', '-lossless', '0', '-q:v', '80', '-an', webp])
       const buf = await readFile(webp); await unlink(webp).catch(() => {})
       return { dataUrl: 'data:image/webp;base64,' + buf.toString('base64'), ext: 'webp' }
     } catch {
       const pal = base + '-pal.png', gif = base + '.gif'
-      await runFfmpeg(['-y', '-i', mp4, '-vf', vf + ',palettegen', pal])
-      await runFfmpeg(['-y', '-i', mp4, '-i', pal, '-lavfi', vf + '[x];[x][1:v]paletteuse', '-loop', '0', gif])
+      await runFfmpeg(['-y', '-i', mp4, '-vf', 'palettegen', pal])
+      await runFfmpeg(['-y', '-i', mp4, '-i', pal, '-lavfi', 'paletteuse', '-loop', '0', gif])
       const buf = await readFile(gif); await unlink(gif).catch(() => {}); await unlink(pal).catch(() => {})
       return { dataUrl: 'data:image/gif;base64,' + buf.toString('base64'), ext: 'gif' }
     }
@@ -450,6 +498,34 @@ const server = createServer(async (req, res) => {
   }
 
   // ── Optimize a simple description into a rich image prompt (Claude Agent SDK, subscription) ──
+  // ── Projects: current + recent, new, open ──
+  if (url.pathname === '/api/project' && req.method === 'GET') {
+    return sendJson(res, 200, { current: CURRENT, recent: RECENT, home: homedir() })
+  }
+  if (url.pathname === '/api/project/new' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    const name = String(body.name || '').trim()
+    if (!name) return sendJson(res, 400, { error: 'Project name is required.' })
+    const mastersDir = resolveMastersDir(name, body.mastersDir)
+    try { await mkdir(mastersDir, { recursive: true }) } catch (e) { return sendJson(res, 502, { error: 'Could not create masters folder: ' + e.message }) }
+    CURRENT = { name, mastersDir }
+    RECENT = [{ name, mastersDir, opened: Date.now() }, ...RECENT.filter(p => p.name !== name)].slice(0, 12)
+    await persistProjects()
+    return sendJson(res, 200, { current: CURRENT, recent: RECENT })
+  }
+  if (url.pathname === '/api/project/open' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    const p = RECENT.find(x => x.name === String(body.name || '').trim())
+    if (!p) return sendJson(res, 404, { error: 'Project not found.' })
+    try { await mkdir(p.mastersDir, { recursive: true }) } catch { /* keep going — folder may be on a detached drive */ }
+    CURRENT = { name: p.name, mastersDir: p.mastersDir }
+    RECENT = [{ ...p, opened: Date.now() }, ...RECENT.filter(x => x.name !== p.name)]
+    await persistProjects()
+    return sendJson(res, 200, { current: CURRENT, recent: RECENT })
+  }
+
   if (url.pathname === '/api/image-prompt' && req.method === 'POST') {
     let body
     try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
@@ -499,8 +575,8 @@ const server = createServer(async (req, res) => {
       imageUrls = [body.image]
     }
     try {
-      const dataUrl = await falImage({ prompt: String(body.prompt).trim(), model: body.model, aspectRatio: body.aspectRatio, width, height, imageUrls })
-      return sendJson(res, 200, { dataUrl })
+      const { dataUrl, master } = await falImage({ prompt: String(body.prompt).trim(), model: body.model, aspectRatio: body.aspectRatio, width, height, imageUrls })
+      return sendJson(res, 200, { dataUrl, master })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'image generation failed' })
     }
@@ -515,9 +591,9 @@ const server = createServer(async (req, res) => {
       ? body.prompt.trim()
       : 'Subtle, gentle ambient motion — slow drift, faint flicker — a calm, seamless loop. Keep the composition stable.'
     try {
-      const mp4 = await falImageToVideo({ image: body.image, prompt })
+      const { buffer: mp4, master } = await falImageToVideo({ image: body.image, prompt })
       const out = await mp4ToAnimatedImage(mp4)
-      return sendJson(res, 200, out)
+      return sendJson(res, 200, { ...out, master })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'animation failed' })
     }
