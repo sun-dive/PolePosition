@@ -376,7 +376,7 @@
   </div>
 
   <div id="artModal" class="modal" hidden>
-    <div class="modal-box">
+    <div class="modal-box art-box">
       <div class="modal-head"><b>🎨 Art</b><button id="artClose" class="ghost" type="button">✕</button></div>
       <p class="dim" style="font-size:12px;margin:0 0 6px">One tool for every image — book covers, chapter art, and 800×800 NFT art. Describe it, Claude writes the prompt, nano-banana generates it. (Claude = your subscription · images = fal.ai/FAL_API_KEY.)</p>
       <details id="mergeBox" style="margin:0 0 8px; border:1px solid var(--line,#33373f); border-radius:6px; padding:6px 8px">
@@ -401,6 +401,9 @@
           <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="mergeGo" class="ai-btn" type="button">🔀 Merge images</button><span id="mergeStatus" class="dim"></span></div>
         </div>
       </details>
+      <div class="art-cols">
+      <section class="art-col art-create">
+        <div class="art-col-h">① Create</div>
       <label class="dim" style="font-size:12px">House style — applied to every image (set once per book, for consistency)</label>
       <input id="artStyle" class="title-in" style="width:100%; margin:0 0 6px" placeholder="e.g. flat vector, warm gold on charcoal, soft glow, no text" />
       <div class="row" style="margin:0 0 10px; gap:8px; align-items:center">
@@ -434,7 +437,10 @@
         <input id="artFile" type="file" accept="image/*" hidden />
         <span id="artStatus" class="dim"></span>
       </div>
-      <div id="artResult" class="cover-result" hidden>
+      </section>
+      <div id="artResult" class="cover-result art-out" hidden>
+        <section class="art-col">
+        <div class="art-col-h">② Result &amp; Refine</div>
         <img id="artImg" alt="art preview" />
         <div class="cover-actions">
           <button id="artUseCover" class="ghost" type="button">Use as book cover</button>
@@ -446,8 +452,10 @@
         <label class="dim" style="font-size:12px; margin-top:10px; display:block">Refine THIS image (keeps the composition)</label>
         <textarea id="artEditInstr" class="cover-prompt" rows="3" placeholder="e.g. make the background lighter; keep everything else the same"></textarea>
         <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="artEdit" class="ai-btn" type="button">✏️ Edit image</button><span id="artEditStatus" class="dim"></span></div>
-
-        <label class="dim" style="font-size:12px; margin-top:14px; display:block">🎬 Animate THIS image → looping cover (fal image→video → animated WebP). Describe the motion; keep it subtle.</label>
+        </section>
+        <section class="art-col">
+        <div class="art-col-h">③ Animate</div>
+        <label class="dim" style="font-size:12px; margin-top:0; display:block">🎬 Animate THIS image → looping cover (fal image→video → animated WebP). Describe the motion; keep it subtle.</label>
         <textarea id="artAnimPrompt" class="cover-prompt" rows="3" placeholder="e.g. gentle drifting particles, slow glow flicker, faint camera drift"></textarea>
         <div class="row" style="margin-top:6px; gap:8px; align-items:center; flex-wrap:wrap">
           <select id="artAnimTemplate" class="project-select" title="Load a motion preset"></select>
@@ -459,6 +467,8 @@
           <img id="artAnimImg" alt="animated preview" style="max-width:100%; border-radius:6px" />
           <div class="cover-actions" style="margin-top:6px"><button id="artAnimDownload" class="ghost" type="button">Download animation</button></div>
         </div>
+        </section>
+      </div>
       </div>
     </div>
   </div>

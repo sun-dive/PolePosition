@@ -113,6 +113,16 @@ body.rich-mode .rich-editor {
 .cover-result { margin-top: 12px; }
 .cover-result img { display: block; max-width: 100%; max-height: 50vh; margin: 0 auto; border-radius: 8px; border: 1px solid var(--line); }
 .cover-actions { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+/* Wide multi-column Art panel — keep Create / Result+Refine / Animate in separate panes so features
+   don't stack in one narrow, scroll-heavy column. Collapses back to one column on narrow windows. */
+.art-box { max-width: 1200px; }
+.art-cols { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.art-create { flex: 1 1 340px; min-width: 300px; }
+#artResult.art-out { flex: 2 1 640px; margin-top: 0; display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+#artResult[hidden] { display: none !important; } /* keep the hidden toggle working despite display:flex */
+.art-out > .art-col { flex: 1 1 300px; min-width: 280px; }
+.art-col-h { font-weight: 700; font-size: 13px; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); color: var(--fg); }
+@media (max-width: 760px) { .art-cols, #artResult.art-out { flex-direction: column; } }
 /* Sequence-clips builder */
 .seq-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .seq-step { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
