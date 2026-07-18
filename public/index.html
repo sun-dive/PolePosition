@@ -448,7 +448,7 @@
         <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="artEdit" class="ai-btn" type="button">✏️ Edit image</button><span id="artEditStatus" class="dim"></span></div>
 
         <label class="dim" style="font-size:12px; margin-top:14px; display:block">🎬 Animate THIS image → looping cover (fal image→video → animated WebP). Describe the motion; keep it subtle.</label>
-        <input id="artAnimPrompt" class="title-in" style="width:100%" placeholder="e.g. gentle drifting particles, slow glow flicker, faint camera drift" />
+        <textarea id="artAnimPrompt" class="cover-prompt" rows="3" placeholder="e.g. gentle drifting particles, slow glow flicker, faint camera drift"></textarea>
         <div class="row" style="margin-top:6px; gap:8px; align-items:center; flex-wrap:wrap">
           <select id="artAnimTemplate" class="project-select" title="Load a motion preset"></select>
           <button id="artAnimSuggest" class="ai-btn" type="button" title="Claude suggests subtle motion tailored to this image">✨ Suggest motion</button>

@@ -1798,6 +1798,14 @@ $('artAnimDownload').onclick = downloadArtAnim
 $('artAnimSuggest').onclick = suggestMotion
 $('artAnimTemplate').onchange = e => { if (e.target.value) $('artAnimPrompt').value = e.target.value } // sticky: keep the chosen preset shown
 $('artPurpose').onchange = e => { if (e.target.value === 'cover' && !$('artPrompt').value.trim()) $('artPrompt').value = DEFAULT_COVER_PROMPT }
+// Strip trailing whitespace/newlines from the prompt fields on focus + blur, so re-editing after a render
+// (or a paste that carried a trailing newline) never starts with a stray blank line. Trailing blank lines in
+// a prompt are never wanted, and this is source-agnostic — it cleans whatever put them there.
+for (const _pid of ['artDesc', 'artPrompt', 'artEditInstr', 'artAnimPrompt']) {
+  const _el = $(_pid); if (!_el) continue
+  const _strip = () => { const v = _el.value.replace(/[ \t\r\n]+$/, ''); if (v !== _el.value) _el.value = v }
+  _el.addEventListener('focus', _strip); _el.addEventListener('blur', _strip)
+}
 $('artOpen').onclick = () => $('artFile').click()
 $('artFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return
