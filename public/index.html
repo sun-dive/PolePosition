@@ -147,11 +147,12 @@
       <div class="row" style="margin-top:10px; gap:10px; align-items:center; flex-wrap:wrap">
         <label class="dim" style="font-size:12px">Frame rate
           <select id="seqFps">
-            <option value="full">Full (~14 fps)</option>
-            <option value="half" selected>Half (~7 fps) — smaller</option>
-            <option value="third">Third (~5 fps) — smallest</option>
+            <option value="1">Full frame rate</option>
+            <option value="2" selected>Half</option>
+            <option value="3">Third</option>
           </select>
         </label>
+        <span id="seqDetected" class="dim" style="font-size:12px"></span>
         <span id="seqEstimate" class="dim" style="font-size:12px"></span>
         <button id="seqBuild" class="ai-btn" type="button">🎬 Build looping cover</button>
         <span id="seqStatus" class="dim"></span>

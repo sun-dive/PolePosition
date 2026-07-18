@@ -260,11 +260,44 @@ function runCmd (cmd, args, capture) {
   })
 }
 
-// Reduce an animated image to a fraction of its frame rate: keep every `stride`-th frame and multiply each
-// frame's delay so it plays at the same real-time speed (stride 1 = unchanged, 2 = half fps, 3 = third). Uses
-// ImageMagick (robust on animated WebP, unlike ffmpeg). Returns a new file path.
+// Reduce an animated image to a fraction of its frame rate: keep every `stride`-th frame and stretch each
+// kept frame's duration so it plays at the same real-time speed (stride 1 = unchanged, 2 = half fps, 3 = third).
+// Returns a new file path.
+//
+// PREFERRED path = LOSSLESS remux via webpmux: extract each kept frame's ORIGINAL encoded bitstream and just
+// re-time it (no decode, no re-encode → zero quality loss). Only valid when every frame is full-canvas
+// (offset 0,0, full size) — true for video/Kling clips. Falls back to the ImageMagick coalesce+re-encode path
+// for partial-frame inputs or if webpmux is unavailable.
 async function reduceFps (inputPath, stride) {
   if (stride <= 1) return inputPath
+  try {
+    const info = await runCmd('webpmux', ['-info', inputPath], true)
+    const cm = info.match(/Canvas size:\s*(\d+)\s*x\s*(\d+)/i)
+    const W = cm ? +cm[1] : 0, H = cm ? +cm[2] : 0
+    const rows = []
+    for (const line of info.split('\n')) {
+      const m = line.trim().match(/^(\d+):\s+(\d+)\s+(\d+)\s+\S+\s+(\d+)\s+(\d+)\s+(\d+)\s/)
+      if (m) rows.push({ w: +m[2], h: +m[3], x: +m[4], y: +m[5], dur: +m[6] }) // dur = ms
+    }
+    // Only remux when every frame is full-canvas (dropping a partial/blended frame would corrupt the picture).
+    if (rows.length > 1 && W > 0 && rows.every(r => r.x === 0 && r.y === 0 && r.w === W && r.h === H)) {
+      const dir = inputPath + '.wm'
+      await mkdir(dir, { recursive: true })
+      const frameArgs = []
+      for (let i = 0; i < rows.length; i += stride) {
+        let dur = 0
+        for (let j = i; j < Math.min(i + stride, rows.length); j++) dur += rows[j].dur // absorb dropped frames' time
+        const fp = join(dir, `f${String(i).padStart(5, '0')}.webp`)
+        await runCmd('webpmux', ['-get', 'frame', String(i + 1), inputPath, '-o', fp]) // webpmux frames are 1-indexed
+        frameArgs.push('-frame', fp, `+${dur || 40}+0+0+0-b`) // full-canvas, no offset, dispose none, no-blend
+      }
+      const out = inputPath + '.reduced.webp'
+      await runCmd('webpmux', [...frameArgs, '-loop', '0', '-o', out])
+      await rm(dir, { recursive: true, force: true })
+      return out
+    }
+  } catch { /* webpmux missing or unexpected output → fall through to the ImageMagick path below */ }
+  // Fallback: coalesce → re-encode (always correct, incl. partial-frame inputs, but lossy).
   const dir = inputPath + '.frames'
   await mkdir(dir, { recursive: true })
   await runCmd('magick', [inputPath, '-coalesce', join(dir, 'f-%05d.png')])
@@ -283,6 +316,9 @@ async function buildSequence (steps, stride) {
   const base = join(tmpdir(), 'pp-seq-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
   const args = []
   for (const s of steps) for (let i = 0; i < s.repeat; i++) args.push(s.path)
+  // Single clip, played once → no concat needed. Skip the ImageMagick concat (which would re-encode) and
+  // reduce the original directly, so a single-clip frame-rate reduction stays fully lossless (webpmux remux).
+  if (args.length === 1) return await reduceFps(args[0], stride)
   const full = base + '-full.webp'
   await runCmd('magick', [...args, '-loop', '0', full])
   if (stride <= 1) return full
@@ -405,7 +441,9 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/api/sequence' && req.method === 'POST') {
     let body
     try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
-    const stride = body.fps === 'third' ? 3 : body.fps === 'half' ? 2 : 1
+    const stride = (Number.isFinite(+body.stride) && +body.stride >= 1)
+      ? Math.min(30, Math.floor(+body.stride))
+      : (body.fps === 'third' ? 3 : body.fps === 'half' ? 2 : 1) // back-compat with the old full/half/third strings
     const rawSteps = Array.isArray(body.steps) ? body.steps : []
     const tmp = []
     try {

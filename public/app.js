@@ -580,26 +580,51 @@ function toSquareDataUrl (dataUrl, px) {
 
 /* ---- Sequence clips → a looping animated WebP cover (add clip ×N each, choose frame rate) ---- */
 function renumberSeq () { Array.from($('seqList').children).forEach((li, i) => { li.querySelector('.seq-num').textContent = (i + 1) }) }
-// Read an animated WebP's total playback time (ms) by summing ANMF frame durations — no decode needed.
-function webpAnimDurationMs (buf) {
+// Parse an animated WebP's ANMF chunks for total playback time (ms) AND frame count — no decode needed.
+function webpAnimInfo (buf) {
   const dv = new DataView(buf)
   if (dv.byteLength < 16 || dv.getUint32(0, false) !== 0x52494646 /*RIFF*/ || dv.getUint32(8, false) !== 0x57454250 /*WEBP*/) return null
-  let off = 12, total = 0, found = false
+  let off = 12, total = 0, frames = 0
   while (off + 8 <= dv.byteLength) {
     const fourcc = dv.getUint32(off, false), size = dv.getUint32(off + 4, true), payload = off + 8
     if (fourcc === 0x414e4d46 /*ANMF*/ && payload + 15 <= dv.byteLength) {
       const ms = dv.getUint8(payload + 12) | (dv.getUint8(payload + 13) << 8) | (dv.getUint8(payload + 14) << 16) // 24-bit LE ms
-      total += Math.round(ms / 10) * 10 // ImageMagick re-times to centiseconds on output; match it so the estimate agrees with the build
-      found = true
+      total += ms // raw ms — the lossless webpmux path preserves exact durations
+      frames++
     }
     off = payload + size + (size & 1) // chunks are even-padded
   }
-  return found ? total : null
+  return frames ? { ms: total, frames } : null
+}
+function webpAnimDurationMs (buf) { const i = webpAnimInfo(buf); return i ? i.ms : null }
+const fmtFps = fps => (Math.abs(fps - Math.round(fps)) < 0.1 ? String(Math.round(fps)) : fps.toFixed(1))
+// Detected input fps drives the frame-rate menu: offer only whole-number divisions (½, ⅓, …) that stay ≥ 4 fps.
+let seqInputFps = 0
+function rebuildSeqFps () {
+  const sel = $('seqFps'), prev = sel.value
+  if (!seqInputFps) {
+    sel.innerHTML = '<option value="1">Full frame rate</option><option value="2">Half</option><option value="3">Third</option>'
+    $('seqDetected').textContent = ''
+  } else {
+    const fps = Math.round(seqInputFps), fr = { 2: '½', 3: '⅓', 4: '¼', 5: '⅕', 6: '⅙', 7: '⅐', 8: '⅛' }
+    const opts = [`<option value="1">Full → ${fps} fps</option>`]
+    for (let s = 2; s <= 8; s++) if (fps % s === 0 && fps / s >= 4) opts.push(`<option value="${s}">${fr[s] || '÷' + s} (÷${s}) → ${fps / s} fps</option>`)
+    sel.innerHTML = opts.join('')
+    $('seqDetected').textContent = `detected ${fmtFps(seqInputFps)} fps`
+  }
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev
+  else if (sel.options.length > 1) sel.selectedIndex = 1 // default to the first reduction
+  updateSeqEstimate()
+}
+function refreshSeqFps () {
+  let fps = 0
+  for (const li of Array.from($('seqList').children)) { const f = parseFloat(li.dataset.fps || '0'); if (f > 0) { fps = f; break } }
+  seqInputFps = fps; rebuildSeqFps()
 }
 // Live loop-length + size estimate. Duration = clip ms × repeat (frame-rate-independent); size ≈
 // Σ(clip bytes × repeat) / stride — empirically ~4% conservative vs the actual build, so a safe ceiling.
 function updateSeqEstimate () {
-  const stride = $('seqFps').value === 'third' ? 3 : $('seqFps').value === 'half' ? 2 : 1
+  const stride = Number($('seqFps').value) || 1
   let ms = 0, bytes = 0, known = true
   for (const li of Array.from($('seqList').children)) {
     const f = li.querySelector('.seq-file').files[0]; if (!f) continue
@@ -622,10 +647,17 @@ function addSeqStep () {
     '<button class="ghost seq-del" type="button" title="Remove">✕</button>'
   const file = li.querySelector('.seq-file'), durEl = li.querySelector('.seq-dur')
   file.onchange = async () => {
-    li.dataset.durMs = '0'; durEl.textContent = ''
-    const f = file.files[0]; if (!f) { updateSeqEstimate(); return }
-    try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) { li.dataset.durMs = String(ms); durEl.textContent = (ms / 1000).toFixed(1) + 's' } } catch {}
-    updateSeqEstimate()
+    li.dataset.durMs = '0'; li.dataset.fps = '0'; durEl.textContent = ''
+    const f = file.files[0]; if (!f) { updateSeqEstimate(); refreshSeqFps(); return }
+    try {
+      const info = webpAnimInfo(await f.arrayBuffer())
+      if (info) {
+        li.dataset.durMs = String(info.ms)
+        const fps = info.frames * 1000 / info.ms; li.dataset.fps = String(fps)
+        durEl.textContent = (info.ms / 1000).toFixed(1) + 's · ' + fmtFps(fps) + ' fps'
+      }
+    } catch {}
+    updateSeqEstimate(); refreshSeqFps()
   }
   li.querySelector('.seq-rep').oninput = updateSeqEstimate
   li.querySelector('.seq-del').onclick = () => { li.remove(); renumberSeq(); updateSeqEstimate() }
@@ -634,7 +666,7 @@ function addSeqStep () {
 function readFileDataUrl (file) {
   return new Promise(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => resolve(null); r.readAsDataURL(file) })
 }
-let seqResultData = ''
+let seqResultData = '', seqBaseName = '', seqOutFps = 0
 async function buildSequenceClips () {
   const steps = []
   for (const li of Array.from($('seqList').children)) {
@@ -643,16 +675,19 @@ async function buildSequenceClips () {
     steps.push({ image, repeat: parseInt(li.querySelector('.seq-rep').value, 10) || 1 })
   }
   if (steps.length === 0) { $('seqStatus').textContent = 'Add at least one clip (pick a file).'; return }
+  const firstFile = $('seqList').querySelector('.seq-file')?.files?.[0]
+  seqBaseName = firstFile ? firstFile.name.replace(/\.[^.]+$/, '') : (book.title || 'cover')
   $('seqBuild').disabled = true; $('seqStatus').textContent = 'Building… (assembling + rendering frames)'
   try {
-    const r = await fetch('/api/sequence', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fps: $('seqFps').value, steps }) })
+    const r = await fetch('/api/sequence', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stride: Number($('seqFps').value) || 1, steps }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('seqStatus').textContent = data.error || ('Error ' + r.status); return }
     seqResultData = data.dataUrl
+    seqOutFps = (data.duration > 0) ? data.frames / data.duration : 0
     $('seqImg').src = seqResultData; $('seqResult').hidden = false
     const mb = data.size / 1048576
     const dur = data.duration || 0
-    $('seqInfo').textContent = data.frames + ' frames · ' + dur.toFixed(1) + 's loop · ' + mb.toFixed(2) + ' MB'
+    $('seqInfo').textContent = data.frames + ' frames · ' + (seqOutFps ? fmtFps(seqOutFps) + ' fps · ' : '') + dur.toFixed(1) + 's loop · ' + mb.toFixed(2) + ' MB'
     $('seqStatus').textContent = mb > 3
       ? 'Built (' + mb.toFixed(2) + ' MB) — large for on-chain; try a lower frame rate or fewer repeats.'
       : 'Built (' + mb.toFixed(2) + ' MB) — on-chain-friendly. Download + embed in Kid3.'
@@ -662,9 +697,10 @@ async function buildSequenceClips () {
 function downloadSeq () {
   if (!seqResultData) return
   const a = document.createElement('a'); a.href = seqResultData
-  a.download = (book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-loop.webp'; a.click()
+  const base = (seqBaseName || book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'cover'
+  a.download = base + (seqOutFps ? '-' + Math.round(seqOutFps) + 'fps' : '-loop') + '.webp'; a.click()
 }
-function openSeq () { if ($('seqList').children.length === 0) { addSeqStep(); addSeqStep() } $('seqModal').hidden = false }
+function openSeq () { if ($('seqList').children.length === 0) { addSeqStep(); addSeqStep() } refreshSeqFps(); $('seqModal').hidden = false }
 $('btnSeq').onclick = openSeq
 $('seqClose').onclick = () => { $('seqModal').hidden = true }
 $('seqModal').addEventListener('click', e => { if (e.target === $('seqModal')) $('seqModal').hidden = true })
