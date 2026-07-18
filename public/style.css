@@ -158,6 +158,8 @@ body.rich-mode .rich-editor {
 .proj-recent li.active { border-color: var(--accent, #6ea8fe); }
 .proj-recent .pr-name { font-weight: 600; }
 .proj-recent .pr-dir { font-size: 11px; color: var(--muted, #999); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.seq-exp-lab { display: flex; flex-direction: column; gap: 4px; white-space: nowrap; }
+.seq-exp-lab select { background: var(--bg); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 5px 8px; font: inherit; }
 /* Music-video scene timeline */
 .tl-preview { position: relative; width: 100%; max-width: 340px; aspect-ratio: 16 / 9; margin: 0 auto 10px; background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .tl-preview img { width: 100%; height: 100%; object-fit: contain; display: none; } /* contain = show the whole frame (16:9 fills, square pillarboxes) — never crop the scene */

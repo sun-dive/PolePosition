@@ -461,6 +461,57 @@ async function buildSequence (steps) {
   return reduced
 }
 
+// Per-frame durations (ms) of an animated WebP, read from `webpmux -info` (duration is the 7th column).
+async function frameDurations (p) {
+  const info = await runCmd('webpmux', ['-info', p], true)
+  const durs = []
+  for (const line of info.split('\n')) {
+    const m = line.match(/^\s*\d+:\s+\d+\s+\d+\s+\S+\s+\d+\s+\d+\s+(\d+)\s/)
+    if (m) durs.push(parseInt(m[1], 10))
+  }
+  return durs
+}
+// Export an animated WebP at a chosen resolution + frame rate. Resizing preserves aspect (target width);
+// a target fps resamples to constant frame rate while preserving real-time duration; fps 0 keeps native
+// (variable) timing. ffmpeg can't read our animated WebP, so this stays on ImageMagick + img2webp/webpmux.
+async function reencodeWebp (inPath, { width, fps, quality = 80, lossless = false }) {
+  const base = join(tmpdir(), 'pp-exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  const dir = base + '-f'
+  await mkdir(dir, { recursive: true })
+  const out = base + '.webp'
+  try {
+    const scale = width ? ['-resize', String(width) + 'x'] : [] // width only → aspect preserved
+    await runCmd('magick', [inPath, '-coalesce', ...scale, join(dir, 'rf-%04d.png')])
+    const files = (await readdir(dir)).filter(f => f.startsWith('rf-')).sort()
+    if (!files.length) throw new Error('could not read frames')
+    const durs = await frameDurations(inPath)
+    if (fps && fps > 0) {
+      // Resample to constant fps: pick the source frame active at each sample time; equal delays out.
+      const total = durs.reduce((a, b) => a + b, 0) || files.length * 100
+      const cum = []; let acc = 0; for (const d of durs) { cum.push(acc); acc += d }
+      const frameAt = t => { let idx = 0; for (let i = 0; i < cum.length; i++) { if (t >= cum[i]) idx = i; else break } return idx }
+      const step = 1000 / fps
+      const N = Math.max(1, Math.round(total / step))
+      const list = []
+      for (let i = 0; i < N; i++) list.push(join(dir, files[Math.min(frameAt(i * step), files.length - 1)]))
+      const q = lossless ? ['-lossless'] : ['-lossy', '-q', String(quality)]
+      await runCmd('img2webp', ['-loop', '0', ...q, '-d', String(Math.round(step)), ...list, '-o', out])
+    } else {
+      // Keep native per-frame timing: re-encode each resized frame, reassemble with its original duration.
+      const fa = []
+      for (let i = 0; i < files.length; i++) {
+        const wf = join(dir, 'w-' + String(i).padStart(4, '0') + '.webp')
+        const q = lossless ? ['-define', 'webp:lossless=true'] : ['-quality', String(quality)]
+        await runCmd('magick', [join(dir, files[i]), ...q, wf])
+        fa.push('-frame', wf, `+${durs[i] || 100}+0+0+0-b`)
+      }
+      await runCmd('webpmux', [...fa, '-loop', '0', '-o', out])
+    }
+    const buf = await readFile(out)
+    return 'data:image/webp;base64,' + buf.toString('base64')
+  } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); await unlink(out).catch(() => {}) }
+}
+
 function sendJson (res, code, obj) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
 function readJson (req) {
   return new Promise((resolve, reject) => {
@@ -634,6 +685,26 @@ const server = createServer(async (req, res) => {
     } finally {
       for (const f of tmp) { await unlink(f).catch(() => {}); await unlink(f + '.reduced.webp').catch(() => {}); await rm(f + '.frames', { recursive: true, force: true }).catch(() => {}) }
     }
+  }
+
+  // ── Export a built WebP at a chosen resolution + frame rate (native-res YouTube vs byte-efficient on-chain) ──
+  if (url.pathname === '/api/export-webp' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    const m = typeof body.image === 'string' && body.image.match(/^data:image\/webp;base64,(.+)$/i)
+    if (!m) return sendJson(res, 400, { error: 'Build a looping WebP first.' })
+    const width = body.width ? Math.min(4096, Math.max(16, Math.round(Number(body.width) || 0))) : 0
+    const fps = body.fps ? Math.min(60, Math.max(1, Number(body.fps) || 0)) : 0
+    const lossless = body.lossless === true || body.quality === 'lossless'
+    const quality = lossless ? 80 : Math.min(100, Math.max(1, Math.round(Number(body.quality) || 80)))
+    const inPath = join(tmpdir(), 'pp-expin-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.webp')
+    try {
+      await writeFile(inPath, Buffer.from(m[1], 'base64'))
+      const dataUrl = await reencodeWebp(inPath, { width, fps, quality, lossless })
+      return sendJson(res, 200, { dataUrl, size: Math.round(dataUrl.length * 3 / 4) })
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message || 'export failed' })
+    } finally { await unlink(inPath).catch(() => {}) }
   }
 
   // ── Video (MP4/MOV/WebM) → downsized looping animated WebP (16:9 or square, low fps) for on-chain content ──

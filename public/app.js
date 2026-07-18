@@ -699,6 +699,7 @@ async function buildSequenceClips () {
     seqResultData = data.dataUrl
     seqOutFps = (data.duration > 0) ? data.frames / data.duration : 0
     $('seqImg').src = seqResultData; $('seqResult').hidden = false
+    fillSeqExport(seqResultData)
     const mb = data.size / 1048576
     const dur = data.duration || 0
     const fpsNote = seqClipCount > 1 ? 'variable fps · ' : (seqOutFps ? fmtFps(seqOutFps) + ' fps · ' : '')
@@ -716,6 +717,45 @@ function downloadSeq () {
   const tag = seqClipCount > 1 ? '-seq' : (seqOutFps ? '-' + Math.round(seqOutFps) + 'fps' : '-loop')
   a.download = base + tag + '.webp'; a.click()
 }
+const dataUrlToBuf = du => { const b = atob(du.slice(du.indexOf(',') + 1)); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer }
+// Offer target resolutions (native + standard widths ≤ native) and frame rates for the export.
+function fillSeqExport (dataUrl) {
+  let w = 0, h = 0
+  try { const info = webpAnimInfo(dataUrlToBuf(dataUrl)); if (info) { w = info.w; h = info.h } } catch {}
+  const resSel = $('seqExpRes'); resSel.innerHTML = ''; resSel.dataset.native = String(w)
+  const ar = w ? h / w : 9 / 16
+  const addRes = (width, label) => { const o = document.createElement('option'); o.value = String(width); o.textContent = label; resSel.appendChild(o) }
+  if (w) addRes(w, 'Native (' + w + '×' + h + ')')
+  for (const pw of [1920, 1280, 854, 640, 512, 384, 256]) if (!w || pw < w) addRes(pw, pw + ' (→ ' + pw + '×' + (Math.round(pw * ar / 2) * 2) + ')')
+  const fpsSel = $('seqExpFps'); fpsSel.innerHTML = ''
+  const addFps = (v, l) => { const o = document.createElement('option'); o.value = String(v); o.textContent = l; fpsSel.appendChild(o) }
+  addFps(0, 'Native (as built)')
+  for (const f of [30, 24, 15, 12, 10, 8, 6, 5]) addFps(f, f + ' fps')
+  $('seqExpStatus').textContent = ''
+}
+async function exportSeq () {
+  if (!seqResultData) return
+  const nativeW = Number($('seqExpRes').dataset.native) || 0
+  const chosenW = Number($('seqExpRes').value) || 0
+  const width = (chosenW && chosenW !== nativeW) ? chosenW : 0 // 0 = keep native width
+  const fps = Number($('seqExpFps').value) || 0
+  const qv = $('seqExpQ').value
+  const lossless = qv === 'lossless'
+  const quality = lossless ? 80 : (Number(qv) || 80)
+  $('seqExpGo').disabled = true; $('seqExpStatus').textContent = 'Exporting…'
+  try {
+    const r = await fetch('/api/export-webp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: seqResultData, width, fps, quality, lossless }) })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { $('seqExpStatus').textContent = data.error || ('Error ' + r.status); return }
+    const base = (seqBaseName || book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'cover'
+    const wLabel = width || nativeW || 'native'
+    const tag = '-' + wLabel + 'w' + (fps ? '-' + fps + 'fps' : '') + (lossless ? '-lossless' : '')
+    const a = document.createElement('a'); a.href = data.dataUrl; a.download = base + tag + '.webp'; a.click()
+    const mb = (data.size || Math.round(data.dataUrl.length * 3 / 4)) / 1048576
+    $('seqExpStatus').textContent = 'Exported ' + wLabel + 'px' + (fps ? ' · ' + fps + ' fps' : ' · native fps') + (lossless ? ' · lossless' : '') + ' · ' + mb.toFixed(2) + ' MB'
+  } catch (e) { $('seqExpStatus').textContent = 'Failed: ' + e.message }
+  finally { $('seqExpGo').disabled = false }
+}
 function openSeq () { if ($('seqList').children.length === 0) { addSeqStep(); addSeqStep() } $('seqModal').hidden = false }
 $('btnSeq').onclick = openSeq
 $('seqClose').onclick = () => { $('seqModal').hidden = true }
@@ -723,6 +763,7 @@ $('seqModal').addEventListener('click', e => { if (e.target === $('seqModal')) $
 $('seqAdd').onclick = addSeqStep
 $('seqBuild').onclick = buildSequenceClips
 $('seqDownload').onclick = downloadSeq
+$('seqExpGo').onclick = exportSeq
 
 /* ---- Project: name + masters folder (archives every fal.ai original, full-res) ----
    A project is tiny for now — a name and a masters folder. The server saves every generated image/video

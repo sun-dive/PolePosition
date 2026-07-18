@@ -178,7 +178,23 @@
           <div id="seqResult" hidden style="margin-top:10px">
             <div class="dim" style="font-size:11px; margin-bottom:4px">Native size (scroll if larger) — judge the frame rate &amp; compression honestly:</div>
             <div class="seq-out-wrap"><img id="seqImg" alt="looping cover preview" /></div>
-            <div class="cover-actions" style="margin-top:6px; align-items:center; gap:8px"><button id="seqDownload" class="ghost" type="button">Download</button><span id="seqInfo" class="dim"></span></div>
+            <div class="cover-actions" style="margin-top:6px; align-items:center; gap:8px"><button id="seqDownload" class="ghost" type="button">Download master (native)</button><span id="seqInfo" class="dim"></span></div>
+            <div id="seqExport" class="seq-export">
+              <div class="seq-col-h" style="margin-top:12px">Export a version</div>
+              <p class="dim" style="font-size:11px; margin:0 0 8px">Pick a target resolution + frame rate — full-res for YouTube, a small one for on-chain minting. The master above stays untouched.</p>
+              <div class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-end">
+                <label class="dim seq-exp-lab">Resolution<select id="seqExpRes"></select></label>
+                <label class="dim seq-exp-lab">Frame rate<select id="seqExpFps"></select></label>
+                <label class="dim seq-exp-lab">Quality<select id="seqExpQ">
+                  <option value="80">High (q80)</option>
+                  <option value="65">Medium (q65)</option>
+                  <option value="45">Small (q45)</option>
+                  <option value="lossless">Lossless</option>
+                </select></label>
+                <button id="seqExpGo" class="ai-btn" type="button">Export</button>
+                <span id="seqExpStatus" class="dim" style="font-size:12px"></span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
