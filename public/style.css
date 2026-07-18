@@ -131,6 +131,10 @@ body.rich-mode .rich-editor {
 .seq-step .seq-dur { font-size: 11px; white-space: nowrap; min-width: 34px; text-align: right; }
 .seq-step .seq-rep { width: 52px; background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 4px 6px; }
 .seq-step .seq-del { line-height: 1; padding: 2px 8px; }
+.seq-step .seq-thumb { width: 64px; height: 40px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); flex: 0 0 auto; }
+/* Output at NATIVE size (no scaling) inside a scroll box, so frame-rate/compression can be judged truthfully. */
+.seq-out-wrap { overflow: auto; max-height: 62vh; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 4px; }
+.seq-out-wrap img { display: block; border-radius: 4px; }
 #seqFps { background: var(--bg); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 5px 8px; font: inherit; }
 /* Music-video scene timeline */
 .tl-preview { position: relative; width: 100%; max-width: 340px; aspect-ratio: 16 / 9; margin: 0 auto 10px; background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }

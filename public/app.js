@@ -641,14 +641,21 @@ function updateSeqEstimate () {
 function addSeqStep () {
   const li = document.createElement('li'); li.className = 'seq-step'
   li.innerHTML = '<span class="seq-num"></span>' +
+    '<img class="seq-thumb" alt="" hidden />' +
     '<input type="file" accept="image/*" class="seq-file" />' +
     '<span class="seq-dur dim"></span>' +
     '<label class="dim" style="font-size:12px; white-space:nowrap">repeat ×<input type="number" class="seq-rep" min="1" max="50" value="1" /></label>' +
     '<button class="ghost seq-del" type="button" title="Remove">✕</button>'
-  const file = li.querySelector('.seq-file'), durEl = li.querySelector('.seq-dur')
+  const file = li.querySelector('.seq-file'), durEl = li.querySelector('.seq-dur'), thumb = li.querySelector('.seq-thumb')
+  const setThumb = f => {
+    if (thumb.dataset.url) { try { URL.revokeObjectURL(thumb.dataset.url) } catch {} }
+    if (f) { const u = URL.createObjectURL(f); thumb.dataset.url = u; thumb.src = u; thumb.hidden = false }
+    else { thumb.removeAttribute('src'); thumb.dataset.url = ''; thumb.hidden = true }
+  }
   file.onchange = async () => {
     li.dataset.durMs = '0'; li.dataset.fps = '0'; durEl.textContent = ''
-    const f = file.files[0]; if (!f) { updateSeqEstimate(); refreshSeqFps(); return }
+    const f = file.files[0]; setThumb(f)
+    if (!f) { updateSeqEstimate(); refreshSeqFps(); return }
     try {
       const info = webpAnimInfo(await f.arrayBuffer())
       if (info) {
@@ -660,7 +667,7 @@ function addSeqStep () {
     updateSeqEstimate(); refreshSeqFps()
   }
   li.querySelector('.seq-rep').oninput = updateSeqEstimate
-  li.querySelector('.seq-del').onclick = () => { li.remove(); renumberSeq(); updateSeqEstimate() }
+  li.querySelector('.seq-del').onclick = () => { setThumb(null); li.remove(); renumberSeq(); updateSeqEstimate(); refreshSeqFps() }
   $('seqList').append(li); renumberSeq()
 }
 function readFileDataUrl (file) {
