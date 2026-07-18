@@ -474,13 +474,17 @@ async function frameDurations (p) {
 // Export an animated WebP at a chosen resolution + frame rate. Resizing preserves aspect (target width);
 // a target fps resamples to constant frame rate while preserving real-time duration; fps 0 keeps native
 // (variable) timing. ffmpeg can't read our animated WebP, so this stays on ImageMagick + img2webp/webpmux.
-async function reencodeWebp (inPath, { width, fps, quality = 80, lossless = false }) {
+async function reencodeWebp (inPath, { width, height, fps, quality = 80, lossless = false }) {
   const base = join(tmpdir(), 'pp-exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
   const dir = base + '-f'
   await mkdir(dir, { recursive: true })
   const out = base + '.webp'
   try {
-    const scale = width ? ['-resize', String(width) + 'x'] : [] // width only → aspect preserved
+    // width+height → crop-to-fit an exact WxH (cover: scale to fill, centre-crop — no distortion, e.g. 7:4→16:9).
+    // width only → scale to that width, keep source aspect.  neither → native.
+    const scale = (width && height)
+      ? ['-resize', `${width}x${height}^`, '-gravity', 'center', '-extent', `${width}x${height}`]
+      : width ? ['-resize', String(width) + 'x'] : []
     await runCmd('magick', [inPath, '-coalesce', ...scale, join(dir, 'rf-%04d.png')])
     const files = (await readdir(dir)).filter(f => f.startsWith('rf-')).sort()
     if (!files.length) throw new Error('could not read frames')
@@ -517,7 +521,7 @@ const mp4Crf = q => Math.min(30, Math.max(15, Math.round(30 - (Number(q) || 80) 
 // Flatten a music-video timeline (clips looping under a song) into ONE file at a chosen resolution + frame rate.
 // Each placement shows its clip, looping from its cue until the next cue; the video runs the song's length.
 // format 'mp4' → H.264 + AAC (with the soundtrack); 'webp' → silent animated WebP. Returns the output path.
-async function renderTimeline ({ clips, placements, audioPath, durationSec, width, fps, quality, lossless, format }) {
+async function renderTimeline ({ clips, placements, audioPath, durationSec, width, height, fps, quality, lossless, format }) {
   const workBase = join(tmpdir(), 'pp-render-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
   const framesRoot = workBase + '-clips'
   const created = [framesRoot]
@@ -530,11 +534,16 @@ async function renderTimeline ({ clips, placements, audioPath, durationSec, widt
       const p = workBase + '-in-' + (slug(c.name, 20) || 'clip') + '-' + Math.random().toString(36).slice(2, 6) + '.webp'
       await writeFile(p, Buffer.from(c.data, 'base64')); clipPaths.set(c.name, p); created.push(p)
     }
-    let baseSize = null // canvas from the LARGEST clip (highest res wins), then scale to the target width
-    for (const [, p] of clipPaths) { const sz = await clipSize(p); if (sz && (!baseSize || sz.w * sz.h > baseSize.w * baseSize.h)) baseSize = sz }
-    if (!baseSize) baseSize = { w: 1280, h: 720 }
-    let W = width || baseSize.w
-    let H = Math.round(W * baseSize.h / baseSize.w)
+    let W, H
+    if (width && height) {
+      W = width; H = height // explicit target (e.g. a 16:9 standard) — each clip cover-fits to it, cropping aspect
+    } else {
+      let baseSize = null // canvas from the LARGEST clip (highest res wins), then scale to the target width
+      for (const [, p] of clipPaths) { const sz = await clipSize(p); if (sz && (!baseSize || sz.w * sz.h > baseSize.w * baseSize.h)) baseSize = sz }
+      if (!baseSize) baseSize = { w: 1280, h: 720 }
+      W = width || baseSize.w
+      H = Math.round(W * baseSize.h / baseSize.w)
+    }
     W -= W % 2; H -= H % 2; W = Math.max(2, W); H = Math.max(2, H) // even dims for H.264/yuv420p
     // Decode + cover-fit each distinct clip to WxH frames; remember each clip's frames + per-frame durations.
     const info = new Map()
@@ -773,13 +782,14 @@ const server = createServer(async (req, res) => {
     const m = typeof body.image === 'string' && body.image.match(/^data:image\/webp;base64,(.+)$/i)
     if (!m) return sendJson(res, 400, { error: 'Build a looping WebP first.' })
     const width = body.width ? Math.min(4096, Math.max(16, Math.round(Number(body.width) || 0))) : 0
+    const height = body.height ? Math.min(4096, Math.max(16, Math.round(Number(body.height) || 0))) : 0 // with width → crop-to-fit
     const fps = body.fps ? Math.min(60, Math.max(1, Number(body.fps) || 0)) : 0
     const lossless = body.lossless === true || body.quality === 'lossless'
     const quality = lossless ? 80 : Math.min(100, Math.max(1, Math.round(Number(body.quality) || 80)))
     const inPath = join(tmpdir(), 'pp-expin-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.webp')
     try {
       await writeFile(inPath, Buffer.from(m[1], 'base64'))
-      const dataUrl = await reencodeWebp(inPath, { width, fps, quality, lossless })
+      const dataUrl = await reencodeWebp(inPath, { width, height, fps, quality, lossless })
       return sendJson(res, 200, { dataUrl, size: Math.round(dataUrl.length * 3 / 4) })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'export failed' })
@@ -805,6 +815,7 @@ const server = createServer(async (req, res) => {
     if (!clips.length || !placements.length) return sendJson(res, 400, { error: 'Need at least one clip and one timeline placement.' })
     const format = body.format === 'webp' ? 'webp' : 'mp4'
     const width = body.width ? Math.min(4096, Math.max(16, Math.round(Number(body.width) || 0))) : 0
+    const height = body.height ? Math.min(4096, Math.max(16, Math.round(Number(body.height) || 0))) : 0 // with width → exact 16:9 canvas
     const fps = Math.min(60, Math.max(1, Math.round(Number(body.fps) || 24)))
     const lossless = body.lossless === true || body.quality === 'lossless'
     const quality = lossless ? 85 : Math.min(100, Math.max(1, Math.round(Number(body.quality) || 80)))
@@ -816,7 +827,7 @@ const server = createServer(async (req, res) => {
     }
     let outPath
     try {
-      outPath = await renderTimeline({ clips, placements, audioPath, durationSec, width, fps, quality, lossless, format })
+      outPath = await renderTimeline({ clips, placements, audioPath, durationSec, width, height, fps, quality, lossless, format })
     } catch (e) {
       if (audioPath) await unlink(audioPath).catch(() => {})
       return sendJson(res, 502, { error: e.message || 'render failed' })

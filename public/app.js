@@ -718,15 +718,34 @@ function downloadSeq () {
   a.download = base + tag + '.webp'; a.click()
 }
 const dataUrlToBuf = du => { const b = atob(du.slice(du.indexOf(',') + 1)); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer }
-// Offer target resolutions (native + standard widths ≤ native) and frame rates for the export.
+// Populate a resolution <select> with: Native (keep aspect), scale-to-width (keep aspect), and 16:9 crop-to-fit
+// standards. The crop-to-fit ones force an exact 16:9 by cover-cropping (e.g. a 7:4 source → true 16:9). Nothing
+// exceeds the source width, so you can't accidentally upscale. Option values: "0"=native, "w512"=width-only,
+// "512x288"=crop-to-fit exact.
+function fillResSelect (sel, maxW, maxH) {
+  const keep = sel.value
+  sel.innerHTML = ''; sel.dataset.native = String(maxW || 0)
+  const ar = (maxW && maxH) ? maxH / maxW : 9 / 16
+  const grp = label => { const g = document.createElement('optgroup'); g.label = label; sel.appendChild(g); return g }
+  const opt = (parent, val, text) => { const o = document.createElement('option'); o.value = val; o.textContent = text; parent.appendChild(o) }
+  opt(sel, '0', maxW ? `Native (${maxW}×${maxH}, keep aspect)` : 'Native (keep aspect)')
+  const g1 = grp('Scale to width — keep aspect')
+  for (const pw of [1920, 1280, 854, 640, 512, 384, 256]) if (!maxW || pw < maxW) opt(g1, 'w' + pw, `${pw} wide → ${pw}×${Math.round(pw * ar / 2) * 2}`)
+  const g2 = grp('16:9 crop-to-fit')
+  for (const [w, h] of [[1920, 1080], [1280, 720], [854, 480], [640, 360], [512, 288], [426, 240]]) if (!maxW || w <= maxW) opt(g2, `${w}x${h}`, `${w}×${h}`)
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep
+}
+// Decode a resolution <select> value → { width, height }. width+height = crop-to-fit; width only = keep aspect.
+function parseResVal (sel) {
+  const v = sel.value || '0'
+  if (v.includes('x')) { const p = v.split('x'); return { width: Number(p[0]) || 0, height: Number(p[1]) || 0 } }
+  if (v[0] === 'w') return { width: Number(v.slice(1)) || 0, height: 0 }
+  return { width: 0, height: 0 } // native
+}
 function fillSeqExport (dataUrl) {
   let w = 0, h = 0
   try { const info = webpAnimInfo(dataUrlToBuf(dataUrl)); if (info) { w = info.w; h = info.h } } catch {}
-  const resSel = $('seqExpRes'); resSel.innerHTML = ''; resSel.dataset.native = String(w)
-  const ar = w ? h / w : 9 / 16
-  const addRes = (width, label) => { const o = document.createElement('option'); o.value = String(width); o.textContent = label; resSel.appendChild(o) }
-  if (w) addRes(w, 'Native (' + w + '×' + h + ')')
-  for (const pw of [1920, 1280, 854, 640, 512, 384, 256]) if (!w || pw < w) addRes(pw, pw + ' (→ ' + pw + '×' + (Math.round(pw * ar / 2) * 2) + ')')
+  fillResSelect($('seqExpRes'), w, h)
   const fpsSel = $('seqExpFps'); fpsSel.innerHTML = ''
   const addFps = (v, l) => { const o = document.createElement('option'); o.value = String(v); o.textContent = l; fpsSel.appendChild(o) }
   addFps(0, 'Native (as built)')
@@ -736,23 +755,23 @@ function fillSeqExport (dataUrl) {
 async function exportSeq () {
   if (!seqResultData) return
   const nativeW = Number($('seqExpRes').dataset.native) || 0
-  const chosenW = Number($('seqExpRes').value) || 0
-  const width = (chosenW && chosenW !== nativeW) ? chosenW : 0 // 0 = keep native width
+  let { width, height } = parseResVal($('seqExpRes'))
+  if (width && !height && width === nativeW) width = 0 // native width, keep aspect → no resize
   const fps = Number($('seqExpFps').value) || 0
   const qv = $('seqExpQ').value
   const lossless = qv === 'lossless'
   const quality = lossless ? 80 : (Number(qv) || 80)
   $('seqExpGo').disabled = true; $('seqExpStatus').textContent = 'Exporting…'
   try {
-    const r = await fetch('/api/export-webp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: seqResultData, width, fps, quality, lossless }) })
+    const r = await fetch('/api/export-webp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: seqResultData, width, height, fps, quality, lossless }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('seqExpStatus').textContent = data.error || ('Error ' + r.status); return }
     const base = (seqBaseName || book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'cover'
-    const wLabel = width || nativeW || 'native'
-    const tag = '-' + wLabel + 'w' + (fps ? '-' + fps + 'fps' : '') + (lossless ? '-lossless' : '')
+    const dim = height ? width + 'x' + height : (width ? width + 'w' : 'native')
+    const tag = '-' + dim + (fps ? '-' + fps + 'fps' : '') + (lossless ? '-lossless' : '')
     const a = document.createElement('a'); a.href = data.dataUrl; a.download = base + tag + '.webp'; a.click()
     const mb = (data.size || Math.round(data.dataUrl.length * 3 / 4)) / 1048576
-    $('seqExpStatus').textContent = 'Exported ' + wLabel + 'px' + (fps ? ' · ' + fps + ' fps' : ' · native fps') + (lossless ? ' · lossless' : '') + ' · ' + mb.toFixed(2) + ' MB'
+    $('seqExpStatus').textContent = 'Exported ' + dim + (fps ? ' · ' + fps + ' fps' : ' · native fps') + (lossless ? ' · lossless' : '') + ' · ' + mb.toFixed(2) + ' MB'
   } catch (e) { $('seqExpStatus').textContent = 'Failed: ' + e.message }
   finally { $('seqExpGo').disabled = false }
 }
@@ -1218,14 +1237,7 @@ function fillTlRender () {
   let maxW = 0, maxH = 0
   for (const [, e] of tlLib) if (e.w && e.w > maxW) { maxW = e.w; maxH = e.h }
   const resSel = $('tlRRes')
-  if (resSel.dataset.native === String(maxW) && resSel.options.length) return // canvas unchanged — keep the user's pick
-  const keep = resSel.value
-  resSel.innerHTML = ''; resSel.dataset.native = String(maxW)
-  const ar = maxW ? maxH / maxW : 9 / 16
-  const addR = (w, l) => { const o = document.createElement('option'); o.value = String(w); o.textContent = l; resSel.appendChild(o) }
-  if (maxW) addR(maxW, 'Native (' + maxW + '×' + maxH + ')'); else addR(0, 'Native')
-  for (const pw of [1920, 1280, 854, 640, 512, 384, 256]) if (!maxW || pw < maxW) addR(pw, pw + ' (→ ' + pw + '×' + (Math.round(pw * ar / 2) * 2) + ')')
-  if ([...resSel.options].some(o => o.value === keep)) resSel.value = keep
+  if (resSel.dataset.native !== String(maxW) || !resSel.options.length) fillResSelect(resSel, maxW, maxH) // rebuild only when the canvas changes (keeps the user's pick)
   const fpsSel = $('tlRFps')
   if (!fpsSel.options.length) {
     for (const f of [30, 24, 15, 12, 10, 8, 6, 5]) { const o = document.createElement('option'); o.value = String(f); o.textContent = f + ' fps'; fpsSel.appendChild(o) }
@@ -1238,8 +1250,8 @@ async function renderTimelineExport () {
   if (!placements.length) { $('tlRStatus').textContent = 'Add at least one timeline placement first.'; return }
   const format = $('tlRFmt').value === 'webp' ? 'webp' : 'mp4'
   const nativeW = Number($('tlRRes').dataset.native) || 0
-  const chosenW = Number($('tlRRes').value) || 0
-  const width = (chosenW && chosenW !== nativeW) ? chosenW : 0 // 0 = native (largest clip)
+  let { width, height } = parseResVal($('tlRRes'))
+  if (width && !height && width === nativeW) width = 0 // native width, keep aspect → largest-clip canvas
   const fps = Number($('tlRFps').value) || 24
   const qv = $('tlRQ').value; const lossless = qv === 'lossless'; const quality = lossless ? 85 : (Number(qv) || 80)
   $('tlRGo').disabled = true
@@ -1256,11 +1268,12 @@ async function renderTimelineExport () {
       const aj = await ar.json().catch(() => ({})); if (ar.ok) audioFile = aj.audioFile
     }
     $('tlRStatus').textContent = (format === 'mp4' && !audioFile) ? 'Rendering silent MP4 (no song loaded)…' : 'Rendering… (long videos take a while)'
-    const r = await fetch('/api/render-timeline', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clips, placements: placements.map(p => ({ t: p.t, name: p.name })), audioFile, durationSec, width, fps, quality, lossless, format }) })
+    const r = await fetch('/api/render-timeline', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clips, placements: placements.map(p => ({ t: p.t, name: p.name })), audioFile, durationSec, width, height, fps, quality, lossless, format }) })
     if (!r.ok) { const j = await r.json().catch(() => ({})); $('tlRStatus').textContent = j.error || ('Error ' + r.status); return }
     const blob = await r.blob()
     const base = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
-    const name = base + '-' + (width || nativeW || 'native') + 'w-' + fps + 'fps.' + (format === 'mp4' ? 'mp4' : 'webp')
+    const dim = height ? width + 'x' + height : ((width || nativeW || 'native') + 'w')
+    const name = base + '-' + dim + '-' + fps + 'fps.' + (format === 'mp4' ? 'mp4' : 'webp')
     triggerDownload(blob, name)
     $('tlRStatus').textContent = 'Rendered ' + name + ' · ' + (blob.size / 1048576).toFixed(1) + ' MB'
   } catch (e) { $('tlRStatus').textContent = 'Failed: ' + e.message }
