@@ -861,7 +861,7 @@ loadProject(true)
 /* ---- Music-video scene timeline → bundle (scenes + song + video.cue) for the PharLap player ----
    Two sections: ① a scene LIBRARY (each clip stored once) and ② a TIMELINE of placements (reuse clips freely).
    This mirrors the on-chain cost model — a clip placed at 5 times is one file + 5 short cue lines. */
-let tlAudioUrl = '', tlAudioFile = null
+let tlAudioUrl = '', tlAudioFile = null, tlAudioTx = '' // tlAudioTx = the song's on-chain txid, for the .bmf export
 const tlLib = new Map() // filename -> { file, url, dur } : the distinct scene clips, each stored once
 
 // Seconds → LRC time "mm:ss.cc" (centiseconds), with carry so 59.999 → 01:00.00 not 00:60.00.
@@ -912,7 +912,13 @@ function renderLib () {
         Array.from($('tlList').children).forEach(li2 => { const s = li2.querySelector('.tl-scene'); if (s && s.value === name) li2.remove() })
         renumberTl(); renderLib(); refreshSceneSelects(); fillTlRender(); updateTlPreview(); saveTimelineSoon()
       }
-      li.append(img, nm, du, use, del); ul.append(li)
+      // Optional on-chain txid of THIS clip's mint — filled in makes the .bmf export reference it (no re-upload).
+      const tx = document.createElement('input'); tx.className = 'tl-lib-tx'; tx.type = 'text'; tx.spellcheck = false
+      tx.placeholder = '⛓ on-chain txid (optional — for .bmf reference)'; tx.value = (e && e.tx) || ''
+      tx.title = 'The genesis txid of this clip’s on-chain mint. Set it and the .bmf export references this clip on-chain instead of bundling it.'
+      tx.oninput = () => { e.tx = tx.value.trim(); tx.classList.toggle('ok', /^[0-9a-f]{64}$/i.test(e.tx)); saveTimelineSoon() }
+      tx.classList.toggle('ok', /^[0-9a-f]{64}$/i.test((e && e.tx) || ''))
+      li.append(img, nm, du, use, del, tx); ul.append(li)
     } catch { /* one bad entry must not hide the rest of the library */ }
   }
 }
@@ -1005,6 +1011,29 @@ function downloadCue () {
   if (!text) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
   triggerDownload(new Blob([text], { type: 'text/plain' }), 'video.cue')
   $('tlStatus').textContent = 'Saved video.cue — mint it with the song + scene clips.'
+}
+// Export a BMF manifest (JSON, on-chain form): scenes + audio referenced by txid where set, so a player
+// (Phar Lap) fetches each component from chain instead of bundling it. Clips without a txid fall back to
+// a name-only reference (resolvable from a .bmc bundle, not fully on-chain).
+function downloadBmf () {
+  const placements = tlPlacements()
+  if (!placements.length) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
+  const scenes = placements.map(p => {
+    const e = tlLib.get(p.name)
+    const s = { t: Math.round(p.t * 100) / 100 }
+    if (e && /^[0-9a-f]{64}$/i.test(e.tx || '')) s.tx = e.tx.toLowerCase()
+    s.name = p.name
+    return s
+  })
+  const manifest = { bmf: 0 }
+  if (tlAudioFile) { manifest.audio = {}; if (/^[0-9a-f]{64}$/i.test(tlAudioTx)) manifest.audio.tx = tlAudioTx.toLowerCase(); manifest.audio.name = tlAudioFile.name }
+  manifest.scenes = scenes
+  const base = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
+  triggerDownload(new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/x.bmf' }), base + '.bmf')
+  const missing = scenes.filter(s => !s.tx).length + ((tlAudioFile && !manifest.audio.tx) ? 1 : 0)
+  $('tlStatus').textContent = missing === 0
+    ? `Exported ${base}.bmf — fully on-chain (${scenes.length} scene refs${tlAudioFile ? ' + audio' : ''}). Phar Lap fetches each component from chain.`
+    : `Exported ${base}.bmf — ${missing} component${missing === 1 ? '' : 's'} still name-only (add their txids to make it fully on-chain).`
 }
 // Transcode a raster STILL (PNG/JPEG) to WebP so the bundle rides small on-chain. Animated clips (WebP/GIF)
 // pass through untouched so their motion survives. Returns { name, bytes } — stills get a .webp extension.
@@ -1185,14 +1214,14 @@ async function saveTimelineState () {
   try {
     const clips = [], want = new Set(['meta'])
     for (const [name, e] of tlLib) {
-      clips.push({ name, dur: e.dur }); const key = 'clip:' + name; want.add(key)
+      clips.push({ name, dur: e.dur, tx: e.tx || '' }); const key = 'clip:' + name; want.add(key)
       if (!mvPersisted.has(key)) { await mvPut(key, e.file); mvPersisted.add(key) }
     }
     if (tlAudioFile) {
       want.add('song')
       if (mvSongName !== tlAudioFile.name) { await mvPut('song', tlAudioFile); mvSongName = tlAudioFile.name }
     }
-    await mvPut('meta', { clips, songName: tlAudioFile ? tlAudioFile.name : '', cue: cueText() })
+    await mvPut('meta', { clips, songName: tlAudioFile ? tlAudioFile.name : '', audioTx: tlAudioTx, cue: cueText() })
     for (const k of Array.from(mvPersisted)) if (!want.has(k)) { await mvDel(k); mvPersisted.delete(k) } // prune removed clips
     if (!tlAudioFile && mvSongName) { await mvDel('song'); mvSongName = '' }
   } catch { /* best-effort autosave — never block editing */ }
@@ -1210,6 +1239,8 @@ async function restoreTimelineState () {
       if (blob) { files.push(new File([blob], c.name, { type: mimeFromName(c.name) })); mvPersisted.add('clip:' + c.name) }
     }
     if (files.length) await addLibFiles(files)
+    for (const c of (meta.clips || [])) { const e = tlLib.get(c.name); if (e && c.tx) e.tx = c.tx } // reapply saved txids
+    if (meta.audioTx) { tlAudioTx = meta.audioTx; const el = $('tlAudioTx'); if (el) el.value = tlAudioTx }
     if (meta.songName) { const s = await mvGet('song'); if (s) { setSong(new File([s], meta.songName, { type: mimeFromName(meta.songName) })); mvSongName = meta.songName } }
     if (meta.cue) importCueText(meta.cue)
     renderLib(); updateTlPreview()
@@ -1308,6 +1339,8 @@ $('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('
 $('tlAddFiles').onchange = () => { const fs = Array.from($('tlAddFiles').files || []); if (fs.length) addLibFiles(fs); $('tlAddFiles').value = '' }
 $('tlAdd').onclick = () => addTlRow()
 $('tlDownload').onclick = downloadCue
+$('tlBmf').onclick = downloadBmf
+$('tlAudioTx').oninput = () => { tlAudioTx = $('tlAudioTx').value.trim(); $('tlAudioTx').classList.toggle('ok', /^[0-9a-f]{64}$/i.test(tlAudioTx)); saveTimelineSoon() }
 $('tlClear').onclick = clearAllTimeline
 $('tlBundle').onclick = downloadBundle
 $('tlLoadBundle').onchange = () => { const f = $('tlLoadBundle').files[0]; if (f) loadBundleFile(f); $('tlLoadBundle').value = '' }

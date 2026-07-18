@@ -210,6 +210,7 @@
         <label class="ghost" style="cursor:pointer" title="Re-open a saved project: scenes + song + timeline">⬆ Restore bundle<input id="tlLoadBundle" type="file" accept=".zip,application/zip" hidden></label>
         <label class="ghost" style="cursor:pointer" title="Rebuild the timeline from a video.cue (add your scene clips first)">⬆ Load cue<input id="tlLoadCue" type="file" accept=".cue,.lrc,.txt,text/plain" hidden></label>
         <span id="tlAudioName" class="dim" style="font-size:12px"></span>
+        <input id="tlAudioTx" class="tl-lib-tx" type="text" spellcheck="false" placeholder="⛓ song's on-chain txid (optional — for .bmf)" title="The genesis txid of the song's on-chain mint. Set it and the .bmf references the audio on-chain (e.g. your original Supersonic mp3)." style="flex:1 1 260px" />
       </div>
       <audio id="tlPlayer" controls style="width:100%; margin-bottom:10px; display:none"></audio>
       <div class="tl-preview"><img id="tlPreview" alt="scene preview" /><span id="tlPreviewHint" class="dim">Add scenes + press play to preview</span></div>
@@ -229,6 +230,7 @@
         <button id="tlBundle" class="ai-btn" type="button">⬇ Download bundle (.zip)</button>
         <label class="dim" style="font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:4px" title="Transcode PNG/JPEG stills to WebP when packing the bundle — big space saving, rides smaller on-chain. Animated WebP/GIF clips are left untouched."><input id="tlWebp" type="checkbox" checked style="margin:0"> stills→WebP</label>
         <button id="tlDownload" class="ghost" type="button">cue only</button>
+        <button id="tlBmf" class="ghost" type="button" title="Export a .bmf manifest — scenes + audio referenced by on-chain txid (where set). A player fetches each component from chain; reuse across future mints.">⛓ Export .bmf</button>
         <button id="tlClear" class="ghost" type="button" title="Start fresh — clears clips, song, placements and the auto-saved session">🗑 Clear</button>
         <span id="tlStatus" class="dim" style="font-size:12px"></span>
       </div>
