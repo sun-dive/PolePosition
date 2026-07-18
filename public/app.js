@@ -862,11 +862,11 @@ async function addLibFiles (files) {
   for (const f of files) {
     const existing = tlLib.get(f.name) // same filename already present → refresh it (re-adding a removed/updated clip must always work)
     if (existing) { try { URL.revokeObjectURL(existing.url) } catch {} mvPersisted.delete('clip:' + f.name); refreshed++ } else added++
-    const entry = { file: f, url: URL.createObjectURL(f), dur: '' }
+    const entry = { file: f, url: URL.createObjectURL(f), dur: '', w: 0, h: 0 }
     tlLib.set(f.name, entry) // one entry per filename (stored once); re-adding overwrites rather than duplicating
-    try { const ms = webpAnimDurationMs(await f.arrayBuffer()); if (ms) entry.dur = (ms / 1000).toFixed(1) + 's' } catch { /* not animated */ }
+    try { const info = webpAnimInfo(await f.arrayBuffer()); if (info) { if (info.ms) entry.dur = (info.ms / 1000).toFixed(1) + 's'; entry.w = info.w; entry.h = info.h } } catch { /* not animated */ }
   }
-  renderLib(); refreshSceneSelects(); saveTimelineSoon()
+  renderLib(); refreshSceneSelects(); fillTlRender(); saveTimelineSoon()
   const parts = []
   if (added) parts.push(`Added ${added} scene clip${added === 1 ? '' : 's'}`)
   if (refreshed) parts.push(`refreshed ${refreshed} already in the library`)
@@ -889,7 +889,7 @@ function renderLib () {
         tlLib.delete(name) // remove from the library FIRST, so it always takes even if a later step throws
         try { if (e && e.url) URL.revokeObjectURL(e.url) } catch {}
         Array.from($('tlList').children).forEach(li2 => { const s = li2.querySelector('.tl-scene'); if (s && s.value === name) li2.remove() })
-        renumberTl(); renderLib(); refreshSceneSelects(); updateTlPreview(); saveTimelineSoon()
+        renumberTl(); renderLib(); refreshSceneSelects(); fillTlRender(); updateTlPreview(); saveTimelineSoon()
       }
       li.append(img, nm, du, use, del); ul.append(li)
     } catch { /* one bad entry must not hide the rest of the library */ }
@@ -1210,8 +1210,64 @@ async function clearAllTimeline () {
   $('tlStatus').textContent = 'Cleared — fresh timeline.'
 }
 
-function openTimeline () { restoreTimelineState(); renderLib(); $('tlModal').hidden = false }
+function openTimeline () { restoreTimelineState(); renderLib(); fillTlRender(); $('tlModal').hidden = false }
 $('btnTimeline').onclick = openTimeline
+
+/* ---- Render the whole timeline → MP4 (with soundtrack) or silent WebP, at a chosen resolution + fps ---- */
+function fillTlRender () {
+  let maxW = 0, maxH = 0
+  for (const [, e] of tlLib) if (e.w && e.w > maxW) { maxW = e.w; maxH = e.h }
+  const resSel = $('tlRRes')
+  if (resSel.dataset.native === String(maxW) && resSel.options.length) return // canvas unchanged — keep the user's pick
+  const keep = resSel.value
+  resSel.innerHTML = ''; resSel.dataset.native = String(maxW)
+  const ar = maxW ? maxH / maxW : 9 / 16
+  const addR = (w, l) => { const o = document.createElement('option'); o.value = String(w); o.textContent = l; resSel.appendChild(o) }
+  if (maxW) addR(maxW, 'Native (' + maxW + '×' + maxH + ')'); else addR(0, 'Native')
+  for (const pw of [1920, 1280, 854, 640, 512, 384, 256]) if (!maxW || pw < maxW) addR(pw, pw + ' (→ ' + pw + '×' + (Math.round(pw * ar / 2) * 2) + ')')
+  if ([...resSel.options].some(o => o.value === keep)) resSel.value = keep
+  const fpsSel = $('tlRFps')
+  if (!fpsSel.options.length) {
+    for (const f of [30, 24, 15, 12, 10, 8, 6, 5]) { const o = document.createElement('option'); o.value = String(f); o.textContent = f + ' fps'; fpsSel.appendChild(o) }
+    fpsSel.value = '24'
+  }
+}
+const fileToB64 = file => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).slice(String(r.result).indexOf(',') + 1)); r.onerror = rej; r.readAsDataURL(file) })
+async function renderTimelineExport () {
+  const placements = tlPlacements()
+  if (!placements.length) { $('tlRStatus').textContent = 'Add at least one timeline placement first.'; return }
+  const format = $('tlRFmt').value === 'webp' ? 'webp' : 'mp4'
+  const nativeW = Number($('tlRRes').dataset.native) || 0
+  const chosenW = Number($('tlRRes').value) || 0
+  const width = (chosenW && chosenW !== nativeW) ? chosenW : 0 // 0 = native (largest clip)
+  const fps = Number($('tlRFps').value) || 24
+  const qv = $('tlRQ').value; const lossless = qv === 'lossless'; const quality = lossless ? 85 : (Number(qv) || 80)
+  $('tlRGo').disabled = true
+  try {
+    $('tlRStatus').textContent = 'Packing clips…'
+    const clips = []
+    for (const [name, e] of tlLib) clips.push({ name, data: await fileToB64(e.file) })
+    let audioFile = null
+    let durationSec = (isFinite($('tlPlayer').duration) && $('tlPlayer').duration > 0) ? $('tlPlayer').duration : 0
+    if (format === 'mp4' && tlAudioFile) {
+      $('tlRStatus').textContent = 'Uploading song…'
+      const ext = (tlAudioFile.name.split('.').pop() || 'bin').toLowerCase()
+      const ar = await fetch('/api/render-audio?ext=' + encodeURIComponent(ext), { method: 'POST', body: tlAudioFile })
+      const aj = await ar.json().catch(() => ({})); if (ar.ok) audioFile = aj.audioFile
+    }
+    $('tlRStatus').textContent = (format === 'mp4' && !audioFile) ? 'Rendering silent MP4 (no song loaded)…' : 'Rendering… (long videos take a while)'
+    const r = await fetch('/api/render-timeline', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clips, placements: placements.map(p => ({ t: p.t, name: p.name })), audioFile, durationSec, width, fps, quality, lossless, format }) })
+    if (!r.ok) { const j = await r.json().catch(() => ({})); $('tlRStatus').textContent = j.error || ('Error ' + r.status); return }
+    const blob = await r.blob()
+    const base = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
+    const name = base + '-' + (width || nativeW || 'native') + 'w-' + fps + 'fps.' + (format === 'mp4' ? 'mp4' : 'webp')
+    triggerDownload(blob, name)
+    $('tlRStatus').textContent = 'Rendered ' + name + ' · ' + (blob.size / 1048576).toFixed(1) + ' MB'
+  } catch (e) { $('tlRStatus').textContent = 'Failed: ' + e.message }
+  finally { $('tlRGo').disabled = false }
+}
+$('tlRGo').onclick = renderTimelineExport
+$('tlRFmt').onchange = () => { const w = $('tlRFmt').value === 'webp'; $('tlRQ').value = w ? '65' : '80' }
 $('tlClose').onclick = () => { $('tlModal').hidden = true }
 $('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('tlModal').hidden = true })
 $('tlAddFiles').onchange = () => { const fs = Array.from($('tlAddFiles').files || []); if (fs.length) addLibFiles(fs); $('tlAddFiles').value = '' }

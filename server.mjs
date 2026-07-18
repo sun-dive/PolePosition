@@ -512,6 +512,85 @@ async function reencodeWebp (inPath, { width, fps, quality = 80, lossless = fals
   } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); await unlink(out).catch(() => {}) }
 }
 
+// Map a WebP-style quality (1-100, higher = better) to an x264 CRF (lower = better).
+const mp4Crf = q => Math.min(30, Math.max(15, Math.round(30 - (Number(q) || 80) * 0.16)))
+// Flatten a music-video timeline (clips looping under a song) into ONE file at a chosen resolution + frame rate.
+// Each placement shows its clip, looping from its cue until the next cue; the video runs the song's length.
+// format 'mp4' → H.264 + AAC (with the soundtrack); 'webp' → silent animated WebP. Returns the output path.
+async function renderTimeline ({ clips, placements, audioPath, durationSec, width, fps, quality, lossless, format }) {
+  const workBase = join(tmpdir(), 'pp-render-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  const framesRoot = workBase + '-clips'
+  const created = [framesRoot]
+  await mkdir(framesRoot, { recursive: true })
+  const out = workBase + '.' + (format === 'mp4' ? 'mp4' : 'webp')
+  try {
+    // Write each distinct clip to a temp file; pick the output canvas from the first placement's clip.
+    const clipPaths = new Map()
+    for (const c of clips) {
+      const p = workBase + '-in-' + (slug(c.name, 20) || 'clip') + '-' + Math.random().toString(36).slice(2, 6) + '.webp'
+      await writeFile(p, Buffer.from(c.data, 'base64')); clipPaths.set(c.name, p); created.push(p)
+    }
+    let baseSize = null // canvas from the LARGEST clip (highest res wins), then scale to the target width
+    for (const [, p] of clipPaths) { const sz = await clipSize(p); if (sz && (!baseSize || sz.w * sz.h > baseSize.w * baseSize.h)) baseSize = sz }
+    if (!baseSize) baseSize = { w: 1280, h: 720 }
+    let W = width || baseSize.w
+    let H = Math.round(W * baseSize.h / baseSize.w)
+    W -= W % 2; H -= H % 2; W = Math.max(2, W); H = Math.max(2, H) // even dims for H.264/yuv420p
+    // Decode + cover-fit each distinct clip to WxH frames; remember each clip's frames + per-frame durations.
+    const info = new Map()
+    for (const [name, p] of clipPaths) {
+      const dir = join(framesRoot, (slug(name, 20) || 'c') + '-' + Math.random().toString(36).slice(2, 6))
+      await mkdir(dir, { recursive: true })
+      await runCmd('magick', [p, '-coalesce', '-resize', `${W}x${H}^`, '-gravity', 'center', '-extent', `${W}x${H}`, join(dir, 'f-%04d.png')])
+      const frames = (await readdir(dir)).filter(f => f.startsWith('f-')).sort().map(f => join(dir, f))
+      if (!frames.length) continue
+      let durs = await frameDurations(p)
+      if (durs.length < frames.length) durs = durs.concat(Array(frames.length - durs.length).fill(durs[durs.length - 1] || 100))
+      durs = durs.slice(0, frames.length)
+      info.set(name, { frames, durs, total: durs.reduce((a, b) => a + b, 0) || frames.length * 100 })
+    }
+    const pls = placements.filter(pl => info.has(pl.name)).map(pl => ({ t: Number(pl.t) || 0, name: pl.name })).sort((a, b) => a.t - b.t)
+    if (!pls.length) throw new Error('no usable placements (clip missing?)')
+    let T = Number(durationSec) || 0
+    if (!T) { const last = pls[pls.length - 1]; T = last.t + info.get(last.name).total / 1000 }
+    T = Math.max(0.1, T)
+    const step = 1 / fps
+    const N = Math.max(1, Math.round(T * fps))
+    const activeAt = t => { let cur = pls[0]; for (const s of pls) { if (s.t <= t) cur = s; else break } return cur }
+    const frameAt = (ci, elapsedMs) => {
+      const loopT = ((elapsedMs % ci.total) + ci.total) % ci.total
+      let acc = 0
+      for (let i = 0; i < ci.frames.length; i++) { acc += ci.durs[i]; if (loopT < acc) return ci.frames[i] }
+      return ci.frames[ci.frames.length - 1]
+    }
+    const outFrames = []
+    for (let i = 0; i < N; i++) { const t = i * step; const pl = activeAt(t); outFrames.push(frameAt(info.get(pl.name), (t - pl.t) * 1000)) }
+    if (format === 'mp4') {
+      const listPath = workBase + '-list.txt'; created.push(listPath)
+      const esc = f => f.replace(/'/g, "'\\''")
+      let txt = ''
+      for (const f of outFrames) txt += `file '${esc(f)}'\nduration ${step.toFixed(6)}\n`
+      txt += `file '${esc(outFrames[outFrames.length - 1])}'\n` // concat demuxer repeats the last frame
+      await writeFile(listPath, txt)
+      const args = ['-y', '-f', 'concat', '-safe', '0', '-i', listPath]
+      if (audioPath) args.push('-i', audioPath)
+      args.push('-r', String(fps), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', String(lossless ? 16 : mp4Crf(quality)))
+      if (audioPath) args.push('-c:a', 'aac', '-b:a', '192k', '-shortest')
+      args.push('-movflags', '+faststart', out)
+      await runFfmpeg(args)
+    } else {
+      // Run-length collapse identical consecutive frames → few args, then img2webp with per-run durations.
+      const runs = []
+      for (const f of outFrames) { const l = runs[runs.length - 1]; if (l && l.f === f) l.n++; else runs.push({ f, n: 1 }) }
+      const args = ['-loop', '0', ...(lossless ? ['-lossless'] : ['-lossy', '-q', String(quality)])]
+      for (const r of runs) args.push('-d', String(Math.round(r.n * step * 1000)), r.f)
+      args.push('-o', out)
+      await runCmd('img2webp', args)
+    }
+    return out
+  } finally { for (const f of created) await rm(f, { recursive: true, force: true }).catch(() => {}) }
+}
+
 function sendJson (res, code, obj) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
 function readJson (req) {
   return new Promise((resolve, reject) => {
@@ -705,6 +784,51 @@ const server = createServer(async (req, res) => {
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'export failed' })
     } finally { await unlink(inPath).catch(() => {}) }
+  }
+
+  // ── Render a music-video timeline → one file (MP4 w/ soundtrack, or silent WebP), at a chosen res + fps ──
+  // Audio arrives first as a raw upload (base64 JSON would bloat a big FLAC past the 80MB body cap).
+  if (url.pathname === '/api/render-audio' && req.method === 'POST') {
+    try {
+      const ext = (url.searchParams.get('ext') || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'bin'
+      const buf = await readRawBody(req, 400e6)
+      const name = 'pp-raudio-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + '.' + ext
+      await writeFile(join(tmpdir(), name), buf)
+      return sendJson(res, 200, { audioFile: name })
+    } catch (e) { return sendJson(res, 502, { error: e.message || 'audio upload failed' }) }
+  }
+  if (url.pathname === '/api/render-timeline' && req.method === 'POST') {
+    let body
+    try { body = await readJson(req) } catch (e) { return sendJson(res, 400, { error: 'bad request body (' + e.message + ')' }) }
+    const clips = Array.isArray(body.clips) ? body.clips.filter(c => c && c.name && typeof c.data === 'string') : []
+    const placements = Array.isArray(body.placements) ? body.placements : []
+    if (!clips.length || !placements.length) return sendJson(res, 400, { error: 'Need at least one clip and one timeline placement.' })
+    const format = body.format === 'webp' ? 'webp' : 'mp4'
+    const width = body.width ? Math.min(4096, Math.max(16, Math.round(Number(body.width) || 0))) : 0
+    const fps = Math.min(60, Math.max(1, Math.round(Number(body.fps) || 24)))
+    const lossless = body.lossless === true || body.quality === 'lossless'
+    const quality = lossless ? 85 : Math.min(100, Math.max(1, Math.round(Number(body.quality) || 80)))
+    const durationSec = Math.max(0, Number(body.durationSec) || 0)
+    let audioPath = null
+    if (format === 'mp4' && typeof body.audioFile === 'string') {
+      const bn = body.audioFile.replace(/[^a-z0-9._-]/gi, '')
+      if (bn.startsWith('pp-raudio-')) { const ap = join(tmpdir(), bn); if (existsSync(ap)) audioPath = ap }
+    }
+    let outPath
+    try {
+      outPath = await renderTimeline({ clips, placements, audioPath, durationSec, width, fps, quality, lossless, format })
+    } catch (e) {
+      if (audioPath) await unlink(audioPath).catch(() => {})
+      return sendJson(res, 502, { error: e.message || 'render failed' })
+    }
+    if (audioPath) await unlink(audioPath).catch(() => {})
+    try {
+      const buf = await readFile(outPath)
+      res.writeHead(200, { 'content-type': format === 'mp4' ? 'video/mp4' : 'image/webp', 'content-length': buf.length })
+      res.end(buf)
+    } catch { sendJson(res, 502, { error: 'could not read rendered output' }) }
+    finally { await unlink(outPath).catch(() => {}) }
+    return
   }
 
   // ── Video (MP4/MOV/WebM) → downsized looping animated WebP (16:9 or square, low fps) for on-chain content ──

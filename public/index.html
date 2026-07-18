@@ -232,6 +232,26 @@
         <button id="tlClear" class="ghost" type="button" title="Start fresh — clears clips, song, placements and the auto-saved session">🗑 Clear</button>
         <span id="tlStatus" class="dim" style="font-size:12px"></span>
       </div>
+      <div id="tlRender" class="seq-export">
+        <div class="seq-col-h" style="margin-top:14px">Render the whole video</div>
+        <p class="dim" style="font-size:11px; margin:0 0 8px">Flatten the timeline (clips looping to their cues) into one file at a chosen resolution + frame rate — an <b>MP4 with the soundtrack</b> for YouTube or to check the sequence before minting, or a <b>silent WebP</b>. The bundle above stays the on-chain deliverable.</p>
+        <div class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-end">
+          <label class="dim seq-exp-lab">Format<select id="tlRFmt">
+            <option value="mp4">MP4 (video + audio)</option>
+            <option value="webp">WebP (silent)</option>
+          </select></label>
+          <label class="dim seq-exp-lab">Resolution<select id="tlRRes"></select></label>
+          <label class="dim seq-exp-lab">Frame rate<select id="tlRFps"></select></label>
+          <label class="dim seq-exp-lab">Quality<select id="tlRQ">
+            <option value="80">High (q80)</option>
+            <option value="65">Medium (q65)</option>
+            <option value="45">Small (q45)</option>
+            <option value="lossless">Lossless</option>
+          </select></label>
+          <button id="tlRGo" class="ai-btn" type="button">Render</button>
+          <span id="tlRStatus" class="dim" style="font-size:12px"></span>
+        </div>
+      </div>
     </div>
   </div>
 
