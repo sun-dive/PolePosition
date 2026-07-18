@@ -40,23 +40,25 @@ const PP_DIR = join(homedir(), '.poleposition')
 const PROJECTS_FILE = join(PP_DIR, 'projects.json')
 let CURRENT = null // { name, mastersDir }
 let RECENT = []    // [{ name, mastersDir, opened }]  most-recent first
+let LAST_RENDER_DIR = '' // last folder a music-video render was saved to — reused as the default next time
 const slug = (s, n = 48) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, n)
+const expandTilde = p => { p = String(p || '').trim(); return p.startsWith('~') ? join(homedir(), p.slice(1).replace(/^[/\\]+/, '')) : p }
 function loadProjectsState () {
   try {
     if (!existsSync(PROJECTS_FILE)) return
     const s = JSON.parse(readFileSync(PROJECTS_FILE, 'utf8'))
     RECENT = Array.isArray(s.recent) ? s.recent.filter(p => p && p.name && p.mastersDir) : []
-    if (s.current) { const c = RECENT.find(p => p.name === s.current); if (c) CURRENT = { name: c.name, mastersDir: c.mastersDir } }
+    if (s.current) { const c = RECENT.find(p => p.name === s.current); if (c) CURRENT = { name: c.name, mastersDir: c.mastersDir, renderDir: c.renderDir || '' } }
+    if (typeof s.lastRenderDir === 'string') LAST_RENDER_DIR = s.lastRenderDir
   } catch (e) { console.warn('  ⚠️  projects.json unreadable — starting fresh:', e.message) }
 }
 async function persistProjects () {
-  try { await mkdir(PP_DIR, { recursive: true }); await writeFile(PROJECTS_FILE, JSON.stringify({ current: CURRENT?.name || null, recent: RECENT }, null, 2)) }
+  try { await mkdir(PP_DIR, { recursive: true }); await writeFile(PROJECTS_FILE, JSON.stringify({ current: CURRENT?.name || null, recent: RECENT, lastRenderDir: LAST_RENDER_DIR }, null, 2)) }
   catch (e) { console.warn('  ⚠️  could not save projects.json:', e.message) }
 }
 // Expand a leading ~ and fall back to ~/PolePosition/<slug>-masters when no folder is given.
 function resolveMastersDir (name, dir) {
-  dir = String(dir || '').trim()
-  if (dir.startsWith('~')) dir = join(homedir(), dir.slice(1).replace(/^[/\\]+/, ''))
+  dir = expandTilde(dir)
   if (!dir) dir = join(homedir(), 'PolePosition', (slug(name) || 'project') + '-masters')
   return dir
 }
@@ -639,7 +641,7 @@ const server = createServer(async (req, res) => {
   // ── Optimize a simple description into a rich image prompt (Claude Agent SDK, subscription) ──
   // ── Projects: current + recent, new, open ──
   if (url.pathname === '/api/project' && req.method === 'GET') {
-    return sendJson(res, 200, { current: CURRENT, recent: RECENT, home: homedir() })
+    return sendJson(res, 200, { current: CURRENT, recent: RECENT, home: homedir(), lastRenderDir: LAST_RENDER_DIR })
   }
   if (url.pathname === '/api/project/new' && req.method === 'POST') {
     let body
@@ -659,7 +661,7 @@ const server = createServer(async (req, res) => {
     const p = RECENT.find(x => x.name === String(body.name || '').trim())
     if (!p) return sendJson(res, 404, { error: 'Project not found.' })
     try { await mkdir(p.mastersDir, { recursive: true }) } catch { /* keep going — folder may be on a detached drive */ }
-    CURRENT = { name: p.name, mastersDir: p.mastersDir }
+    CURRENT = { name: p.name, mastersDir: p.mastersDir, renderDir: p.renderDir || '' }
     RECENT = [{ ...p, opened: Date.now() }, ...RECENT.filter(x => x.name !== p.name)]
     await persistProjects()
     return sendJson(res, 200, { current: CURRENT, recent: RECENT })
@@ -820,6 +822,12 @@ const server = createServer(async (req, res) => {
     const lossless = body.lossless === true || body.quality === 'lossless'
     const quality = lossless ? 85 : Math.min(100, Math.max(1, Math.round(Number(body.quality) || 80)))
     const durationSec = Math.max(0, Number(body.durationSec) || 0)
+    // Optional server-side save: write the render straight into a chosen folder (+ remember it) instead of
+    // streaming it back for a browser download. Filename is sanitised and forced to the format's extension.
+    const outDir = expandTilde(body.outDir)
+    let filename = String(body.filename || '').replace(/[/\\]/g, '').trim().replace(/\.(mp4|webp)$/i, '')
+    if (!filename) filename = 'music-video'
+    filename += format === 'mp4' ? '.mp4' : '.webp'
     let audioPath = null
     if (format === 'mp4' && typeof body.audioFile === 'string') {
       const bn = body.audioFile.replace(/[^a-z0-9._-]/gi, '')
@@ -833,6 +841,21 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 502, { error: e.message || 'render failed' })
     }
     if (audioPath) await unlink(audioPath).catch(() => {})
+    if (outDir) {
+      // Save straight into the chosen folder and remember it as the default for next time.
+      try {
+        await mkdir(outDir, { recursive: true })
+        const dest = join(outDir, filename)
+        const buf = await readFile(outPath)
+        await writeFile(dest, buf)
+        LAST_RENDER_DIR = outDir
+        if (CURRENT) { CURRENT.renderDir = outDir; const rec = RECENT.find(p => p.name === CURRENT.name); if (rec) rec.renderDir = outDir } // remember per-project
+        await persistProjects()
+        return sendJson(res, 200, { saved: true, path: dest, size: buf.length })
+      } catch (e) {
+        return sendJson(res, 502, { error: 'Could not save to that folder: ' + e.message })
+      } finally { await unlink(outPath).catch(() => {}) }
+    }
     try {
       const buf = await readFile(outPath)
       res.writeHead(200, { 'content-type': format === 'mp4' ? 'video/mp4' : 'image/webp', 'content-length': buf.length })

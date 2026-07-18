@@ -789,12 +789,14 @@ $('seqExpGo').onclick = exportSeq
    original into that folder as it's created; the chip in the header shows which project is active. */
 let ppCurrent = null // { name, mastersDir }
 let ppHome = ''
+let ppLastRenderDir = '' // last folder a music-video render was saved to — the default for the next one
 const slugify = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48)
 // Suffix for a status line telling whether the fal.ai original was archived to the masters folder.
 function masterNote (m) { return m ? ' · master saved ✓' : (ppCurrent ? ' · ⚠ master save failed' : ' · ⚠ no project — original not archived') }
 function renderProject (data) {
   ppCurrent = data.current || null
   if (typeof data.home === 'string') ppHome = data.home
+  if (typeof data.lastRenderDir === 'string') ppLastRenderDir = data.lastRenderDir
   const chip = $('ppProject'), nameEl = $('ppProjectName')
   nameEl.textContent = ppCurrent ? ppCurrent.name : 'No project'
   chip.classList.toggle('no-project', !ppCurrent)
@@ -1243,6 +1245,11 @@ function fillTlRender () {
     for (const f of [30, 24, 15, 12, 10, 8, 6, 5]) { const o = document.createElement('option'); o.value = String(f); o.textContent = f + ' fps'; fpsSel.appendChild(o) }
     fpsSel.value = '24'
   }
+  // Default the save folder (reuse the last one; else a -renders sibling of the masters folder) and a filename.
+  const dirEl = $('tlROutDir')
+  if (!dirEl.value) dirEl.value = (ppCurrent && ppCurrent.renderDir) || ppLastRenderDir || (ppCurrent ? ppCurrent.mastersDir.replace(/[\\/]?$/, '').replace(/-masters$/, '-renders') : '~/PolePosition/renders')
+  const nameEl = $('tlRName')
+  if (!nameEl.value) nameEl.value = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
 }
 const fileToB64 = file => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).slice(String(r.result).indexOf(',') + 1)); r.onerror = rej; r.readAsDataURL(file) })
 async function renderTimelineExport () {
@@ -1254,6 +1261,8 @@ async function renderTimelineExport () {
   if (width && !height && width === nativeW) width = 0 // native width, keep aspect → largest-clip canvas
   const fps = Number($('tlRFps').value) || 24
   const qv = $('tlRQ').value; const lossless = qv === 'lossless'; const quality = lossless ? 85 : (Number(qv) || 80)
+  const outDir = $('tlROutDir').value.trim()
+  const filename = $('tlRName').value.trim()
   $('tlRGo').disabled = true
   try {
     $('tlRStatus').textContent = 'Packing clips…'
@@ -1268,14 +1277,21 @@ async function renderTimelineExport () {
       const aj = await ar.json().catch(() => ({})); if (ar.ok) audioFile = aj.audioFile
     }
     $('tlRStatus').textContent = (format === 'mp4' && !audioFile) ? 'Rendering silent MP4 (no song loaded)…' : 'Rendering… (long videos take a while)'
-    const r = await fetch('/api/render-timeline', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clips, placements: placements.map(p => ({ t: p.t, name: p.name })), audioFile, durationSec, width, height, fps, quality, lossless, format }) })
+    const r = await fetch('/api/render-timeline', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clips, placements: placements.map(p => ({ t: p.t, name: p.name })), audioFile, durationSec, width, height, fps, quality, lossless, format, outDir, filename }) })
     if (!r.ok) { const j = await r.json().catch(() => ({})); $('tlRStatus').textContent = j.error || ('Error ' + r.status); return }
-    const blob = await r.blob()
-    const base = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
-    const dim = height ? width + 'x' + height : ((width || nativeW || 'native') + 'w')
-    const name = base + '-' + dim + '-' + fps + 'fps.' + (format === 'mp4' ? 'mp4' : 'webp')
-    triggerDownload(blob, name)
-    $('tlRStatus').textContent = 'Rendered ' + name + ' · ' + (blob.size / 1048576).toFixed(1) + ' MB'
+    const ct = r.headers.get('content-type') || ''
+    if (ct.includes('application/json')) { // saved server-side to the chosen folder
+      const j = await r.json()
+      if (typeof j.path === 'string') { const dir = j.path.replace(/[\\/][^\\/]+$/, ''); ppLastRenderDir = dir; if (ppCurrent) ppCurrent.renderDir = dir } // remember the folder (per project)
+      $('tlRStatus').textContent = 'Saved → ' + j.path + ' · ' + ((j.size || 0) / 1048576).toFixed(1) + ' MB'
+    } else { // no folder given → browser download
+      const blob = await r.blob()
+      const base = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
+      const dim = height ? width + 'x' + height : ((width || nativeW || 'native') + 'w')
+      const name = base + '-' + dim + '-' + fps + 'fps.' + (format === 'mp4' ? 'mp4' : 'webp')
+      triggerDownload(blob, name)
+      $('tlRStatus').textContent = 'Rendered ' + name + ' · ' + (blob.size / 1048576).toFixed(1) + ' MB'
+    }
   } catch (e) { $('tlRStatus').textContent = 'Failed: ' + e.message }
   finally { $('tlRGo').disabled = false }
 }
