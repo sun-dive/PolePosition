@@ -139,28 +139,36 @@
   <!-- (Book-cover modal removed — merged into the single #artModal “Art” tool below.) -->
 
   <div id="seqModal" class="modal" hidden>
-    <div class="modal-box" style="max-width:700px">
+    <div class="modal-box seq-box">
       <div class="modal-head"><b>🎬 Sequence clips → looping cover</b><button id="seqClose" class="ghost" type="button">✕</button></div>
       <p class="dim" style="font-size:12px; margin:0 0 8px">Add animated clips (WebP/GIF), set how many times each repeats, in order — they concatenate into one looping cover. Lower the frame rate to shrink the file (it rides on-chain).</p>
-      <ol id="seqList" class="seq-list"></ol>
-      <button id="seqAdd" class="ghost" type="button">+ Add clip</button>
-      <div class="row" style="margin-top:10px; gap:10px; align-items:center; flex-wrap:wrap">
-        <label class="dim" style="font-size:12px">Frame rate
-          <select id="seqFps">
-            <option value="1">Full frame rate</option>
-            <option value="2" selected>Half</option>
-            <option value="3">Third</option>
-          </select>
-        </label>
-        <span id="seqDetected" class="dim" style="font-size:12px"></span>
-        <span id="seqEstimate" class="dim" style="font-size:12px"></span>
-        <button id="seqBuild" class="ai-btn" type="button">🎬 Build looping cover</button>
-        <span id="seqStatus" class="dim"></span>
-      </div>
-      <div id="seqResult" hidden style="margin-top:10px">
-        <div class="dim" style="font-size:11px; margin-bottom:4px">Output — shown at native size (scroll if larger) so you can judge the frame rate &amp; compression honestly:</div>
-        <div class="seq-out-wrap"><img id="seqImg" alt="looping cover preview" /></div>
-        <div class="cover-actions" style="margin-top:6px; align-items:center; gap:8px"><button id="seqDownload" class="ghost" type="button">Download</button><span id="seqInfo" class="dim"></span></div>
+      <div class="seq-cols">
+        <div class="seq-in-col">
+          <div class="seq-col-h">Input clips</div>
+          <ol id="seqList" class="seq-list"></ol>
+          <button id="seqAdd" class="ghost" type="button">+ Add clip</button>
+        </div>
+        <div class="seq-out-col">
+          <div class="seq-col-h">Output preview</div>
+          <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
+            <label class="dim" style="font-size:12px">Frame rate
+              <select id="seqFps">
+                <option value="1">Full frame rate</option>
+                <option value="2" selected>Half</option>
+                <option value="3">Third</option>
+              </select>
+            </label>
+            <span id="seqDetected" class="dim" style="font-size:12px"></span>
+            <span id="seqEstimate" class="dim" style="font-size:12px"></span>
+            <button id="seqBuild" class="ai-btn" type="button">🎬 Build looping cover</button>
+            <span id="seqStatus" class="dim"></span>
+          </div>
+          <div id="seqResult" hidden style="margin-top:10px">
+            <div class="dim" style="font-size:11px; margin-bottom:4px">Native size (scroll if larger) — judge the frame rate &amp; compression honestly:</div>
+            <div class="seq-out-wrap"><img id="seqImg" alt="looping cover preview" /></div>
+            <div class="cover-actions" style="margin-top:6px; align-items:center; gap:8px"><button id="seqDownload" class="ghost" type="button">Download</button><span id="seqInfo" class="dim"></span></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
