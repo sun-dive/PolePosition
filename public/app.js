@@ -598,53 +598,49 @@ function webpAnimInfo (buf) {
 }
 function webpAnimDurationMs (buf) { const i = webpAnimInfo(buf); return i ? i.ms : null }
 const fmtFps = fps => (Math.abs(fps - Math.round(fps)) < 0.1 ? String(Math.round(fps)) : fps.toFixed(1))
-// Detected input fps drives the frame-rate menu: offer only whole-number divisions (½, ⅓, …) that stay ≥ 4 fps.
-let seqInputFps = 0
-function rebuildSeqFps () {
-  const sel = $('seqFps'), prev = sel.value
-  if (!seqInputFps) {
-    sel.innerHTML = '<option value="1">Full frame rate</option><option value="2">Half</option><option value="3">Third</option>'
-    $('seqDetected').textContent = ''
-  } else {
-    const fps = Math.round(seqInputFps), fr = { 2: '½', 3: '⅓', 4: '¼', 5: '⅕', 6: '⅙', 7: '⅐', 8: '⅛' }
-    const opts = [`<option value="1">Full → ${fps} fps</option>`]
-    for (let s = 2; s <= 8; s++) if (fps % s === 0 && fps / s >= 4) opts.push(`<option value="${s}">${fr[s] || '÷' + s} (÷${s}) → ${fps / s} fps</option>`)
-    sel.innerHTML = opts.join('')
-    $('seqDetected').textContent = `detected ${fmtFps(seqInputFps)} fps`
-  }
-  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev
-  else if (sel.options.length > 1) sel.selectedIndex = 1 // default to the first reduction
-  updateSeqEstimate()
-}
-function refreshSeqFps () {
-  let fps = 0
-  for (const li of Array.from($('seqList').children)) { const f = parseFloat(li.dataset.fps || '0'); if (f > 0) { fps = f; break } }
-  seqInputFps = fps; rebuildSeqFps()
+// Per-clip frame-rate menu: from THIS clip's detected fps, offer only whole-number divisions (½, ⅓, …) ≥ 4 fps.
+// Each clip keeps its own rate → the output is a single variable-frame-rate WebP.
+function fillClipFps (li, fps) {
+  const sel = li.querySelector('.seq-fps'), lab = li.querySelector('.seq-fps-lab')
+  if (!fps) { lab.hidden = true; sel.innerHTML = ''; return }
+  const f = Math.round(fps), fr = { 2: '½', 3: '⅓', 4: '¼', 5: '⅕', 6: '⅙', 7: '⅐', 8: '⅛' }
+  const opts = [`<option value="1">${f} fps (full)</option>`]
+  for (let s = 2; s <= 8; s++) if (f % s === 0 && f / s >= 4) opts.push(`<option value="${s}">${fr[s] || '÷' + s} → ${f / s} fps</option>`)
+  sel.innerHTML = opts.join('')
+  if (sel.options.length > 1) sel.selectedIndex = 1 // default to the first reduction
+  sel.onchange = updateSeqEstimate
+  lab.hidden = false
 }
 // Live loop-length + size estimate. Duration = clip ms × repeat (frame-rate-independent); size ≈
 // Σ(clip bytes × repeat) / stride — empirically ~4% conservative vs the actual build, so a safe ceiling.
 function updateSeqEstimate () {
-  const stride = Number($('seqFps').value) || 1
   let ms = 0, bytes = 0, known = true
   for (const li of Array.from($('seqList').children)) {
     const f = li.querySelector('.seq-file').files[0]; if (!f) continue
     const r = parseInt(li.querySelector('.seq-rep').value, 10) || 1
+    const stride = Number(li.querySelector('.seq-fps')?.value) || 1 // each clip at its own rate
     const d = parseInt(li.dataset.durMs || '0', 10)
     if (d > 0) ms += d * r; else known = false
-    bytes += f.size * r
+    bytes += f.size * r / stride
   }
   if (bytes <= 0) { $('seqEstimate').textContent = ''; return }
-  const mb = bytes / stride / 1048576
+  const mb = bytes / 1048576
   $('seqEstimate').textContent = '≈ ' + (ms / 1000).toFixed(1) + 's loop' + (known ? '' : ' +') +
     ' · ~' + mb.toFixed(1) + ' MB' + (mb > 3 ? ' ⚠' : '')
 }
 function addSeqStep () {
   const li = document.createElement('li'); li.className = 'seq-step'
-  li.innerHTML = '<span class="seq-num"></span>' +
+  li.innerHTML =
+    '<span class="seq-num"></span>' +
     '<img class="seq-thumb" alt="" hidden />' +
-    '<input type="file" accept="image/*" class="seq-file" />' +
-    '<span class="seq-dur dim"></span>' +
-    '<label class="dim" style="font-size:12px; white-space:nowrap">repeat ×<input type="number" class="seq-rep" min="1" max="50" value="1" /></label>' +
+    '<div class="seq-body">' +
+      '<input type="file" accept="image/*" class="seq-file" />' +
+      '<div class="seq-ctl">' +
+        '<span class="seq-dur dim"></span>' +
+        '<label class="dim seq-fps-lab" hidden style="white-space:nowrap">rate <select class="seq-fps"></select></label>' +
+        '<label class="dim" style="white-space:nowrap">repeat ×<input type="number" class="seq-rep" min="1" max="50" value="1" /></label>' +
+      '</div>' +
+    '</div>' +
     '<button class="ghost seq-del" type="button" title="Remove">✕</button>'
   const file = li.querySelector('.seq-file'), durEl = li.querySelector('.seq-dur'), thumb = li.querySelector('.seq-thumb')
   const setThumb = f => {
@@ -655,38 +651,40 @@ function addSeqStep () {
   file.onchange = async () => {
     li.dataset.durMs = '0'; li.dataset.fps = '0'; durEl.textContent = ''
     const f = file.files[0]; setThumb(f)
-    if (!f) { updateSeqEstimate(); refreshSeqFps(); return }
+    if (!f) { fillClipFps(li, 0); updateSeqEstimate(); return }
     try {
       const info = webpAnimInfo(await f.arrayBuffer())
       if (info) {
         li.dataset.durMs = String(info.ms)
         const fps = info.frames * 1000 / info.ms; li.dataset.fps = String(fps)
         durEl.textContent = (info.ms / 1000).toFixed(1) + 's · ' + fmtFps(fps) + ' fps'
-      }
-    } catch {}
-    updateSeqEstimate(); refreshSeqFps()
+        fillClipFps(li, fps)
+      } else fillClipFps(li, 0)
+    } catch { fillClipFps(li, 0) }
+    updateSeqEstimate()
   }
   li.querySelector('.seq-rep').oninput = updateSeqEstimate
-  li.querySelector('.seq-del').onclick = () => { setThumb(null); li.remove(); renumberSeq(); updateSeqEstimate(); refreshSeqFps() }
+  li.querySelector('.seq-del').onclick = () => { setThumb(null); li.remove(); renumberSeq(); updateSeqEstimate() }
   $('seqList').append(li); renumberSeq()
 }
 function readFileDataUrl (file) {
   return new Promise(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => resolve(null); r.readAsDataURL(file) })
 }
-let seqResultData = '', seqBaseName = '', seqOutFps = 0
+let seqResultData = '', seqBaseName = '', seqOutFps = 0, seqClipCount = 1
 async function buildSequenceClips () {
   const steps = []
   for (const li of Array.from($('seqList').children)) {
     const f = li.querySelector('.seq-file').files[0]; if (!f) continue
     const image = await readFileDataUrl(f); if (!image) continue
-    steps.push({ image, repeat: parseInt(li.querySelector('.seq-rep').value, 10) || 1 })
+    steps.push({ image, repeat: parseInt(li.querySelector('.seq-rep').value, 10) || 1, stride: Number(li.querySelector('.seq-fps')?.value) || 1 })
   }
   if (steps.length === 0) { $('seqStatus').textContent = 'Add at least one clip (pick a file).'; return }
   const firstFile = $('seqList').querySelector('.seq-file')?.files?.[0]
   seqBaseName = firstFile ? firstFile.name.replace(/\.[^.]+$/, '') : (book.title || 'cover')
-  $('seqBuild').disabled = true; $('seqStatus').textContent = 'Building… (assembling + rendering frames)'
+  seqClipCount = steps.length
+  $('seqBuild').disabled = true; $('seqStatus').textContent = 'Building… (assembling frames — lossless)'
   try {
-    const r = await fetch('/api/sequence', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stride: Number($('seqFps').value) || 1, steps }) })
+    const r = await fetch('/api/sequence', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ steps }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('seqStatus').textContent = data.error || ('Error ' + r.status); return }
     seqResultData = data.dataUrl
@@ -694,7 +692,8 @@ async function buildSequenceClips () {
     $('seqImg').src = seqResultData; $('seqResult').hidden = false
     const mb = data.size / 1048576
     const dur = data.duration || 0
-    $('seqInfo').textContent = data.frames + ' frames · ' + (seqOutFps ? fmtFps(seqOutFps) + ' fps · ' : '') + dur.toFixed(1) + 's loop · ' + mb.toFixed(2) + ' MB'
+    const fpsNote = seqClipCount > 1 ? 'variable fps · ' : (seqOutFps ? fmtFps(seqOutFps) + ' fps · ' : '')
+    $('seqInfo').textContent = data.frames + ' frames · ' + fpsNote + dur.toFixed(1) + 's loop · ' + mb.toFixed(2) + ' MB'
     $('seqStatus').textContent = mb > 3
       ? 'Built (' + mb.toFixed(2) + ' MB) — large for on-chain; try a lower frame rate or fewer repeats.'
       : 'Built (' + mb.toFixed(2) + ' MB) — on-chain-friendly. Download + embed in Kid3.'
@@ -705,14 +704,14 @@ function downloadSeq () {
   if (!seqResultData) return
   const a = document.createElement('a'); a.href = seqResultData
   const base = (seqBaseName || book.title || 'cover').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'cover'
-  a.download = base + (seqOutFps ? '-' + Math.round(seqOutFps) + 'fps' : '-loop') + '.webp'; a.click()
+  const tag = seqClipCount > 1 ? '-seq' : (seqOutFps ? '-' + Math.round(seqOutFps) + 'fps' : '-loop')
+  a.download = base + tag + '.webp'; a.click()
 }
-function openSeq () { if ($('seqList').children.length === 0) { addSeqStep(); addSeqStep() } refreshSeqFps(); $('seqModal').hidden = false }
+function openSeq () { if ($('seqList').children.length === 0) { addSeqStep(); addSeqStep() } $('seqModal').hidden = false }
 $('btnSeq').onclick = openSeq
 $('seqClose').onclick = () => { $('seqModal').hidden = true }
 $('seqModal').addEventListener('click', e => { if (e.target === $('seqModal')) $('seqModal').hidden = true })
 $('seqAdd').onclick = addSeqStep
-$('seqFps').onchange = updateSeqEstimate
 $('seqBuild').onclick = buildSequenceClips
 $('seqDownload').onclick = downloadSeq
 

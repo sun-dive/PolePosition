@@ -312,12 +312,56 @@ async function reduceFps (inputPath, stride) {
 
 // Build a looping animated WebP from ordered steps [{ path, repeat }] at the chosen frame-rate stride.
 // Concatenate full-rate (each clip repeated in order), then reduce the whole sequence once. Returns the path.
-async function buildSequence (steps, stride) {
+// Losslessly stitch clips into ONE variable-frame-rate WebP: for each clip keep every (its OWN) stride-th
+// frame's ORIGINAL bitstream — re-timed to absorb the dropped frames — and append it in order/repeat. No
+// decode/re-encode anywhere, and each clip keeps its own optimal frame rate in the single output. Requires
+// every clip to be a same-size, full-canvas WebP; returns null otherwise (caller falls back).
+async function losslessSequence (steps, outPath) {
+  let W = 0, H = 0
+  const clips = []
+  for (const s of steps) {
+    let info
+    try { info = await runCmd('webpmux', ['-info', s.path], true) } catch { return null }
+    const cm = info.match(/Canvas size:\s*(\d+)\s*x\s*(\d+)/i); if (!cm) return null
+    const w = +cm[1], h = +cm[2]
+    if (W === 0) { W = w; H = h } else if (w !== W || h !== H) return null // sizes must match to share one canvas
+    const durs = []
+    for (const line of info.split('\n')) {
+      const m = line.trim().match(/^(\d+):\s+(\d+)\s+(\d+)\s+\S+\s+(\d+)\s+(\d+)\s+(\d+)\s/)
+      if (m) { if (+m[4] !== 0 || +m[5] !== 0 || +m[2] !== w || +m[3] !== h) return null; durs.push(+m[6]) }
+    }
+    if (durs.length === 0) return null
+    clips.push({ path: s.path, durs, stride: Math.max(1, s.stride | 0), repeat: Math.max(1, s.repeat | 0) })
+  }
+  const dir = outPath + '.frames'; await mkdir(dir, { recursive: true })
+  const frameArgs = []; let ci = 0
+  for (const c of clips) {
+    const kept = [] // extract this clip's kept frames ONCE, re-time each to absorb the dropped frames' duration
+    for (let i = 0; i < c.durs.length; i += c.stride) {
+      let dur = 0; for (let j = i; j < Math.min(i + c.stride, c.durs.length); j++) dur += c.durs[j]
+      const fp = join(dir, `c${ci}_${String(i).padStart(5, '0')}.webp`)
+      await runCmd('webpmux', ['-get', 'frame', String(i + 1), c.path, '-o', fp])
+      kept.push({ fp, dur: dur || 40 })
+    }
+    ci++
+    for (let rep = 0; rep < c.repeat; rep++) for (const kf of kept) frameArgs.push('-frame', kf.fp, `+${kf.dur}+0+0+0-b`)
+  }
+  await runCmd('webpmux', [...frameArgs, '-loop', '0', '-o', outPath])
+  await rm(dir, { recursive: true, force: true })
+  return outPath
+}
+
+// Build a looping WebP from ordered steps [{ path, repeat, stride }] — each clip at its OWN target frame rate
+// (variable-frame-rate output). Preferred = the lossless VFR remux above; falls back to an ImageMagick concat
+// + single global reduce (at the first clip's stride) for mixed-size / non-WebP inputs.
+async function buildSequence (steps) {
   const base = join(tmpdir(), 'pp-seq-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  const out = base + '-seq.webp'
+  try { if (await losslessSequence(steps, out)) return out } catch { /* fall through to ImageMagick */ }
+  await unlink(out).catch(() => {})
   const args = []
-  for (const s of steps) for (let i = 0; i < s.repeat; i++) args.push(s.path)
-  // Single clip, played once → no concat needed. Skip the ImageMagick concat (which would re-encode) and
-  // reduce the original directly, so a single-clip frame-rate reduction stays fully lossless (webpmux remux).
+  for (const s of steps) for (let i = 0; i < Math.max(1, s.repeat | 0); i++) args.push(s.path)
+  const stride = Math.max(1, steps[0]?.stride | 0)
   if (args.length === 1) return await reduceFps(args[0], stride)
   const full = base + '-full.webp'
   await runCmd('magick', [...args, '-loop', '0', full])
@@ -441,9 +485,6 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/api/sequence' && req.method === 'POST') {
     let body
     try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
-    const stride = (Number.isFinite(+body.stride) && +body.stride >= 1)
-      ? Math.min(30, Math.floor(+body.stride))
-      : (body.fps === 'third' ? 3 : body.fps === 'half' ? 2 : 1) // back-compat with the old full/half/third strings
     const rawSteps = Array.isArray(body.steps) ? body.steps : []
     const tmp = []
     try {
@@ -453,10 +494,14 @@ const server = createServer(async (req, res) => {
         if (!m) continue
         const p = join(tmpdir(), 'pp-clip-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.webp')
         await writeFile(p, Buffer.from(m[1], 'base64')); tmp.push(p)
-        steps.push({ path: p, repeat: Math.min(50, Math.max(1, Math.floor(Number(s.repeat) || 1))) })
+        steps.push({
+          path: p,
+          repeat: Math.min(50, Math.max(1, Math.floor(Number(s.repeat) || 1))),
+          stride: Math.min(30, Math.max(1, Math.floor(Number(s.stride) || 1))),
+        })
       }
       if (steps.length === 0) return sendJson(res, 400, { error: 'Add at least one clip.' })
-      const outPath = await buildSequence(steps, stride); tmp.push(outPath)
+      const outPath = await buildSequence(steps); tmp.push(outPath)
       const buf = await readFile(outPath)
       // Frame count + total loop duration (sum of per-frame delays, centiseconds → seconds).
       let frames = 0, duration = 0

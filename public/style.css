@@ -125,9 +125,12 @@ body.rich-mode .rich-editor {
 @media (max-width: 760px) { .art-cols, #artResult.art-out { flex-direction: column; } }
 /* Sequence-clips builder */
 .seq-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow-y: auto; }
-.seq-step { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.seq-step { display: flex; align-items: flex-start; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .seq-step .seq-num { color: var(--accent); font-size: 12px; width: 16px; }
-.seq-step .seq-file { flex: 1; min-width: 0; font-size: 12px; }
+.seq-step .seq-file { min-width: 0; max-width: 100%; font-size: 12px; }
+.seq-step .seq-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.seq-step .seq-ctl { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.seq-step .seq-fps { background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 3px 6px; font-size: 12px; }
 .seq-step .seq-dur { font-size: 11px; white-space: nowrap; min-width: 34px; text-align: right; }
 .seq-step .seq-rep { width: 52px; background: var(--panel); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 4px 6px; }
 .seq-step .seq-del { line-height: 1; padding: 2px 8px; }
