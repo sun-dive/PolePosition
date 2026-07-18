@@ -351,14 +351,54 @@ async function losslessSequence (steps, outPath) {
   return outPath
 }
 
+// Read an animated WebP's canvas size (via webpmux) → { w, h } or null.
+async function clipSize (p) {
+  try { const info = await runCmd('webpmux', ['-info', p], true); const m = info.match(/Canvas size:\s*(\d+)\s*x\s*(\d+)/i); return m ? { w: +m[1], h: +m[2] } : null } catch { return null }
+}
+
+// Reduce a clip to `stride` and (if needed) fit it to `target` size, returning a same-size WebP path. Lossless
+// webpmux remux when the clip is already at target size; ImageMagick coalesce + cover-crop + frame-drop
+// otherwise (scaling forces a re-encode). Newly-created temp files are pushed to `created` for cleanup.
+async function reduceAndFit (inPath, stride, target, created) {
+  const st = Math.max(1, stride | 0)
+  const sz = await clipSize(inPath)
+  if (sz && sz.w === target.w && sz.h === target.h) {
+    const r = await reduceFps(inPath, st); if (r !== inPath) created.push(r); return r
+  }
+  const out = inPath + '.norm.webp'; created.push(out)
+  const dir = inPath + '.normf'; await mkdir(dir, { recursive: true })
+  await runCmd('magick', [inPath, '-coalesce', '-resize', `${target.w}x${target.h}^`, '-gravity', 'center', '-extent', `${target.w}x${target.h}`, join(dir, 'f-%05d.png')])
+  let srcDelay = 7
+  try { const d = parseInt((await runCmd('magick', ['identify', '-format', '%T\n', inPath], true)).trim().split(/\s+/)[0], 10); if (d > 0) srcDelay = d } catch { /* default */ }
+  const kept = (await readdir(dir)).filter(f => f.endsWith('.png')).sort().filter((_, i) => i % st === 0).map(f => join(dir, f))
+  await runCmd('magick', ['-delay', String(srcDelay * st), '-loop', '0', ...kept, out])
+  await rm(dir, { recursive: true, force: true })
+  return out
+}
+
 // Build a looping WebP from ordered steps [{ path, repeat, stride }] — each clip at its OWN target frame rate
-// (variable-frame-rate output). Preferred = the lossless VFR remux above; falls back to an ImageMagick concat
-// + single global reduce (at the first clip's stride) for mixed-size / non-WebP inputs.
+// (variable-frame-rate output). Same-size WebPs → fully-lossless remux; mixed sizes → fit each clip to the
+// first clip's canvas (re-encoding only the ones that actually need scaling), then lossless-stitch.
 async function buildSequence (steps) {
   const base = join(tmpdir(), 'pp-seq-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  // 1) Fully-lossless VFR remux (all clips already the same size + full-frame).
   const out = base + '-seq.webp'
-  try { if (await losslessSequence(steps, out)) return out } catch { /* fall through to ImageMagick */ }
+  try { if (await losslessSequence(steps, out)) return out } catch { /* fall through */ }
   await unlink(out).catch(() => {})
+  // 2) Mixed sizes: fit every clip to the first clip's canvas (at its own stride), then lossless-stitch.
+  const created = []
+  try {
+    const target = await clipSize(steps[0].path)
+    if (target) {
+      const normSteps = []
+      for (const s of steps) normSteps.push({ path: await reduceAndFit(s.path, s.stride, target, created), repeat: Math.max(1, s.repeat | 0), stride: 1 })
+      const out2 = base + '-seqn.webp'
+      if (await losslessSequence(normSteps, out2)) { for (const f of created) await unlink(f).catch(() => {}); return out2 }
+      await unlink(out2).catch(() => {})
+    }
+  } catch { /* fall through */ }
+  for (const f of created) await unlink(f).catch(() => {})
+  // 3) Last resort: crude ImageMagick concat (may crop truly-incompatible inputs).
   const args = []
   for (const s of steps) for (let i = 0; i < Math.max(1, s.repeat | 0); i++) args.push(s.path)
   const stride = Math.max(1, steps[0]?.stride | 0)
