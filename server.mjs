@@ -385,10 +385,12 @@ async function buildSequence (steps) {
   const out = base + '-seq.webp'
   try { if (await losslessSequence(steps, out)) return out } catch { /* fall through */ }
   await unlink(out).catch(() => {})
-  // 2) Mixed sizes: fit every clip to the first clip's canvas (at its own stride), then lossless-stitch.
+  // 2) Mixed sizes: fit every clip to the LARGEST clip's canvas (highest res wins — downscale only at
+  //    final export), each at its own stride, then lossless-stitch. Clips already at that size stay lossless.
   const created = []
   try {
-    const target = await clipSize(steps[0].path)
+    let target = null
+    for (const s of steps) { const sz = await clipSize(s.path); if (sz && (!target || sz.w * sz.h > target.w * target.h)) target = sz }
     if (target) {
       const normSteps = []
       for (const s of steps) normSteps.push({ path: await reduceAndFit(s.path, s.stride, target, created), repeat: Math.max(1, s.repeat | 0), stride: 1 })

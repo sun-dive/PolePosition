@@ -584,9 +584,13 @@ function renumberSeq () { Array.from($('seqList').children).forEach((li, i) => {
 function webpAnimInfo (buf) {
   const dv = new DataView(buf)
   if (dv.byteLength < 16 || dv.getUint32(0, false) !== 0x52494646 /*RIFF*/ || dv.getUint32(8, false) !== 0x57454250 /*WEBP*/) return null
-  let off = 12, total = 0, frames = 0
+  let off = 12, total = 0, frames = 0, w = 0, h = 0
   while (off + 8 <= dv.byteLength) {
     const fourcc = dv.getUint32(off, false), size = dv.getUint32(off + 4, true), payload = off + 8
+    if (fourcc === 0x56503858 /*VP8X*/ && payload + 10 <= dv.byteLength) { // extended header carries the canvas size
+      w = 1 + (dv.getUint8(payload + 4) | (dv.getUint8(payload + 5) << 8) | (dv.getUint8(payload + 6) << 16))
+      h = 1 + (dv.getUint8(payload + 7) | (dv.getUint8(payload + 8) << 8) | (dv.getUint8(payload + 9) << 16))
+    }
     if (fourcc === 0x414e4d46 /*ANMF*/ && payload + 15 <= dv.byteLength) {
       const ms = dv.getUint8(payload + 12) | (dv.getUint8(payload + 13) << 8) | (dv.getUint8(payload + 14) << 16) // 24-bit LE ms
       total += ms // raw ms — the lossless webpmux path preserves exact durations
@@ -594,7 +598,7 @@ function webpAnimInfo (buf) {
     }
     off = payload + size + (size & 1) // chunks are even-padded
   }
-  return frames ? { ms: total, frames } : null
+  return frames ? { ms: total, frames, w, h } : null
 }
 function webpAnimDurationMs (buf) { const i = webpAnimInfo(buf); return i ? i.ms : null }
 const fmtFps = fps => (Math.abs(fps - Math.round(fps)) < 0.1 ? String(Math.round(fps)) : fps.toFixed(1))
@@ -614,19 +618,22 @@ function fillClipFps (li, fps) {
 // Live loop-length + size estimate. Duration = clip ms × repeat (frame-rate-independent); size ≈
 // Σ(clip bytes × repeat) / stride — empirically ~4% conservative vs the actual build, so a safe ceiling.
 function updateSeqEstimate () {
-  let ms = 0, bytes = 0, known = true
+  let ms = 0, bytes = 0, known = true; const res = new Set()
   for (const li of Array.from($('seqList').children)) {
     const f = li.querySelector('.seq-file').files[0]; if (!f) continue
     const r = parseInt(li.querySelector('.seq-rep').value, 10) || 1
     const stride = Number(li.querySelector('.seq-fps')?.value) || 1 // each clip at its own rate
     const d = parseInt(li.dataset.durMs || '0', 10)
     if (d > 0) ms += d * r; else known = false
+    if (li.dataset.w && li.dataset.w !== '0') res.add(li.dataset.w + '×' + li.dataset.h)
     bytes += f.size * r / stride
   }
   if (bytes <= 0) { $('seqEstimate').textContent = ''; return }
   const mb = bytes / 1048576
+  // Warn when clips don't share a canvas — the odd ones get scaled to the largest (highest res wins).
+  const mism = res.size > 1 ? ' · ⚠ mixed sizes (' + [...res].join(', ') + ') → scaled to largest' : ''
   $('seqEstimate').textContent = '≈ ' + (ms / 1000).toFixed(1) + 's loop' + (known ? '' : ' +') +
-    ' · ~' + mb.toFixed(1) + ' MB' + (mb > 3 ? ' ⚠' : '')
+    ' · ~' + mb.toFixed(1) + ' MB' + (mb > 3 ? ' ⚠' : '') + mism
 }
 function addSeqStep () {
   const li = document.createElement('li'); li.className = 'seq-step'
@@ -656,8 +663,10 @@ function addSeqStep () {
       const info = webpAnimInfo(await f.arrayBuffer())
       if (info) {
         li.dataset.durMs = String(info.ms)
+        li.dataset.w = String(info.w || 0); li.dataset.h = String(info.h || 0)
         const fps = info.frames * 1000 / info.ms; li.dataset.fps = String(fps)
-        durEl.textContent = (info.ms / 1000).toFixed(1) + 's · ' + fmtFps(fps) + ' fps'
+        const res = (info.w && info.h) ? info.w + '×' + info.h + ' · ' : ''
+        durEl.textContent = res + (info.ms / 1000).toFixed(1) + 's · ' + fmtFps(fps) + ' fps'
         fillClipFps(li, fps)
       } else fillClipFps(li, 0)
     } catch { fillClipFps(li, 0) }
