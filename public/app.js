@@ -1877,6 +1877,8 @@ async function optimizeArtPrompt () {
   } catch (e) { $('artOptStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artOptimize').disabled = false }
 }
+// Nano Banana 2 native output resolution (0.5K/1K/2K/4K). Default 2K (~1080p) for reusable atoms.
+const artRes = () => ($('artRes') ? $('artRes').value : '2K')
 async function generateArt () {
   const base = $('artPrompt').value.trim()
   if (!base) { $('artStatus').textContent = 'Describe/optimize a prompt first.'; return }
@@ -1889,7 +1891,7 @@ async function generateArt () {
   const prompt = `${base}${style ? `\n\nArt style (apply consistently): ${style}` : ''}\n\n${frame}${cropNote}`
   $('artGen').disabled = true; $('artStatus').textContent = 'Generating… (can take 20–40s)'
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: aspect }) })
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, aspectRatio: aspect, resolution: artRes() }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artStatus').textContent = data.error || ('Error ' + r.status); return }
     artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl)
@@ -1903,7 +1905,7 @@ async function editArt () {
   if (!instr) { $('artEditStatus').textContent = 'Describe the change first.'; return }
   $('artEdit').disabled = true; $('artEditStatus').textContent = 'Editing… (can take 20–40s)'
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: artData }) })
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: artData, resolution: artRes() }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artEditStatus').textContent = data.error || ('Error ' + r.status); return }
     { const { px, crop } = parseShape($('artAspect').value); artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl) }
@@ -2134,7 +2136,7 @@ $('mergeGo').onclick = async () => {
   const { aspect, px, crop } = parseShape($('artAspect').value)
   $('mergeGo').disabled = true; $('mergeStatus').textContent = 'Merging… (can take 20–40s)'
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, images: [mergeA, mergeB], aspectRatio: aspect }) })
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, images: [mergeA, mergeB], aspectRatio: aspect, resolution: artRes() }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('mergeStatus').textContent = data.error || ('Error ' + r.status); return }
     artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl)

@@ -84,7 +84,7 @@ if (process.env.ANTHROPIC_API_KEY) {
   delete process.env.ANTHROPIC_API_KEY
 }
 const MODEL = process.env.CLAUDE_MODEL || undefined // optional, e.g. claude-opus-4-8; default = subscription default
-const FAL_MODEL = process.env.FAL_MODEL || 'fal-ai/nano-banana' // P3 image model (nano-banana = great at text; override via .env)
+const FAL_MODEL = process.env.FAL_MODEL || 'fal-ai/nano-banana-2' // image model — Nano Banana 2: native 0.5K/1K/2K/4K, true 16:9 (override via .env)
 // Image-to-video model for "Animate cover". veo2 is confirmed-working but ~$0.50/sec; override FAL_VIDEO_MODEL
 // in .env with a cheaper fast variant (Kling Turbo / Hailuo Fast / LTX) — endpoint id from fal.ai/explore.
 const FAL_VIDEO_MODEL = process.env.FAL_VIDEO_MODEL || 'fal-ai/veo2/image-to-video'
@@ -195,13 +195,18 @@ async function optimizeImagePrompt (description, kind, style, aspect) {
 // Generate an image via fal.ai (P3). Uses FAL_API_KEY from .env — never logged. Returns a data: URL so the
 // browser can show + save it without depending on fal's (time-limited) CDN link. Model-aware: nano-banana
 // (Gemini) takes aspect_ratio + is strong at text; flux-style models take image_size.
-async function falImage ({ prompt, model, aspectRatio, width, height, imageUrls }) {
+async function falImage ({ prompt, model, aspectRatio, width, height, imageUrls, resolution }) {
   const key = process.env.FAL_API_KEY
   if (!key) throw new Error('FAL_API_KEY isn’t set — add it to your local .env to generate images.')
   const editing = Array.isArray(imageUrls) && imageUrls.length > 0
-  const m = model || (editing ? 'fal-ai/nano-banana/edit' : FAL_MODEL)
+  // Derive the edit endpoint from the configured base model so a v2 base uses the v2 edit model.
+  const editModel = FAL_MODEL.includes('nano-banana') ? FAL_MODEL.replace(/\/edit$/, '') + '/edit' : 'fal-ai/nano-banana/edit'
+  const m = model || (editing ? editModel : FAL_MODEL)
+  // Nano Banana 2 accepts a native output resolution (0.5K/1K/2K/4K); v1 ignores it. Only send a valid value.
+  const res2 = ['0.5K', '1K', '2K', '4K'].includes(resolution) ? resolution : null
   const input = m.includes('nano-banana')
     ? { prompt, num_images: 1, output_format: 'png',
+        ...(res2 ? { resolution: res2 } : {}),
         ...(editing
           ? { image_urls: imageUrls, ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}) } // edit: preserve source framing unless explicitly told otherwise
           : { aspect_ratio: aspectRatio || '2:3' }) }
@@ -724,7 +729,7 @@ const server = createServer(async (req, res) => {
       imageUrls = [body.image]
     }
     try {
-      const { dataUrl, master } = await falImage({ prompt: String(body.prompt).trim(), model: body.model, aspectRatio: body.aspectRatio, width, height, imageUrls })
+      const { dataUrl, master } = await falImage({ prompt: String(body.prompt).trim(), model: body.model, aspectRatio: body.aspectRatio, width, height, imageUrls, resolution: body.resolution })
       return sendJson(res, 200, { dataUrl, master })
     } catch (e) {
       return sendJson(res, 502, { error: e.message || 'image generation failed' })

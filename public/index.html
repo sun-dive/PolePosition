@@ -508,6 +508,12 @@
           <option value="1:1@800">🖼️ NFT square 800×800</option>
           <option value="16:9">Landscape 16:9</option>
         </select>
+        <select id="artRes" class="project-select" title="Output resolution (Nano Banana 2 — native, not upscaled)">
+          <option value="0.5K">0.5K (~360p · cheapest)</option>
+          <option value="1K">1K (~720p)</option>
+          <option value="2K" selected>2K (~1080p) ✓</option>
+          <option value="4K">4K (~2160p · hero)</option>
+        </select>
         <button id="artOpen" class="ghost" type="button">📂 Open…</button>
         <input id="artFile" type="file" accept="image/*" hidden />
         <span id="artStatus" class="dim"></span>
