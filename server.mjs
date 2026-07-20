@@ -872,8 +872,13 @@ const server = createServer(async (req, res) => {
     if (!name) return sendJson(res, 400, { error: 'Project name is required.' })
     const mastersDir = resolveMastersDir(name, body.mastersDir)
     try { await mkdir(mastersDir, { recursive: true }) } catch (e) { return sendJson(res, 502, { error: 'Could not create masters folder: ' + e.message }) }
-    CURRENT = { name, mastersDir }
-    RECENT = [{ name, mastersDir, opened: Date.now() }, ...RECENT.filter(p => p.name !== name)].slice(0, 12)
+    const creatorIn = String(body.creator || '').trim()
+    if (creatorIn && !creatorIdentity(creatorIn)) return sendJson(res, 400, { error: 'Creator identity must be a wallet address (1…) or a compressed public key (66 hex).' })
+    // Preserve an existing creator when re-selecting a known project without re-entering it.
+    const prior = RECENT.find(p => p.name === name)
+    const creator = creatorIn || prior?.creator || ''
+    CURRENT = { name, mastersDir, creator }
+    RECENT = [{ name, mastersDir, creator, opened: Date.now() }, ...RECENT.filter(p => p.name !== name)].slice(0, 12)
     await persistProjects()
     return sendJson(res, 200, { current: CURRENT, recent: RECENT })
   }

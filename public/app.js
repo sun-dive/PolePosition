@@ -803,6 +803,12 @@ function renderProject (data) {
   nameEl.textContent = ppCurrent ? ppCurrent.name : 'No project'
   chip.classList.toggle('no-project', !ppCurrent)
   chip.title = ppCurrent ? ('Masters → ' + ppCurrent.mastersDir) : 'No project — click to create one'
+  // Creator identity is a project property → prefill the New-project + timeline fields, and (if set) auto-load
+  // this project's on-chain atoms so 🔍 My atoms is ready without a click.
+  const cr = (ppCurrent && ppCurrent.creator) || ''
+  if ($('projCreator')) $('projCreator').value = cr
+  if ($('tlCreatorId')) { $('tlCreatorId').value = cr; $('tlCreatorId').classList.toggle('ok', /^(0[23][0-9a-f]{64}|[13][1-9A-HJ-NP-Za-km-z]{25,34})$/.test(cr)) }
+  if (cr) scanMyAtoms(true); else if ($('tlMyAtoms')) $('tlMyAtoms').textContent = ''
   const recent = Array.isArray(data.recent) ? data.recent : []
   const wrap = $('projRecentWrap'), list = $('projRecent')
   list.innerHTML = ''
@@ -829,6 +835,7 @@ async function loadProject (autoprompt) {
 function openProjectModal () {
   $('projStatus').textContent = ''
   if (!$('projName').value && !ppCurrent) $('projName').value = ''
+  $('projCreator').value = (ppCurrent && ppCurrent.creator) || '' // reflect the current project's identity
   $('projectModal').hidden = false
   setTimeout(() => $('projName').focus(), 30)
 }
@@ -837,7 +844,7 @@ async function createProject () {
   if (!name) { $('projStatus').textContent = 'Enter a project name.'; $('projName').focus(); return }
   $('projStatus').textContent = 'Creating…'
   try {
-    const r = await fetch('/api/project/new', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, mastersDir: $('projDir').value.trim() }) })
+    const r = await fetch('/api/project/new', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, mastersDir: $('projDir').value.trim(), creator: $('projCreator').value.trim() }) })
     const data = await r.json()
     if (!r.ok) { $('projStatus').textContent = data.error || ('Error ' + r.status); return }
     renderProject(data); $('projStatus').textContent = ''
@@ -1391,7 +1398,6 @@ $('tlImportBtn').onclick = () => doImport(($('tlImportTx').value || '').trim())
 $('tlImportTx').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doImport(($('tlImportTx').value || '').trim()) } })
 
 // 👤 Creator identity + 🔍 My atoms: save the project's address/pubkey, then list this creator's on-chain atoms.
-async function loadCreatorId () { try { const p = await (await fetch('/api/project')).json(); if (p.current && p.current.creator) $('tlCreatorId').value = p.current.creator } catch { /* offline */ } }
 function renderMyAtoms (atoms) {
   const ul = $('tlMyAtoms'); ul.textContent = ''
   for (const a of atoms) {
@@ -1404,6 +1410,18 @@ function renderMyAtoms (atoms) {
     ul.append(li)
   }
 }
+// Scan (GET) the current project's on-chain atoms and render them. `silent` = auto-load on project open
+// (no chatty status). The creator id is already saved on the project, so this doesn't re-save.
+async function scanMyAtoms (silent) {
+  try {
+    const r = await fetch('/api/my-atoms'); const d = await r.json().catch(() => ({}))
+    if (!r.ok) { if (!silent) $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
+    renderMyAtoms(d.atoms || [])
+    const n = (d.atoms || []).length
+    if (!silent) $('tlImportStatus').textContent = n ? `Found ${n} atom${n === 1 ? '' : 's'} at ${d.address}. Click one to reuse it.` : `No content atoms found at ${d.address} yet.`
+    else if (n) $('tlImportStatus').textContent = `${n} atom${n === 1 ? '' : 's'} ready — 🔍 My atoms below.`
+  } catch (e) { if (!silent) $('tlImportStatus').textContent = 'Lookup failed — is the server running? ' + e.message }
+}
 async function myAtoms () {
   const identity = ($('tlCreatorId').value || '').trim()
   $('tlMyAtomsBtn').disabled = true; $('tlImportStatus').textContent = 'Saving identity + scanning the chain for your atoms…'
@@ -1411,18 +1429,13 @@ async function myAtoms () {
     const s = await fetch('/api/project/creator', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identity }) })
     const sd = await s.json().catch(() => ({}))
     if (!s.ok) { $('tlImportStatus').textContent = sd.error || ('Error ' + s.status); return }
+    if (ppCurrent) ppCurrent.creator = identity // keep the in-memory project in sync (so reopening the modal shows it)
     if (!identity) { $('tlMyAtoms').textContent = ''; $('tlImportStatus').textContent = 'Creator identity cleared.'; return }
-    const r = await fetch('/api/my-atoms'); const d = await r.json().catch(() => ({}))
-    if (!r.ok) { $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
-    renderMyAtoms(d.atoms || [])
-    $('tlImportStatus').textContent = (d.atoms || []).length
-      ? `Found ${d.atoms.length} atom${d.atoms.length === 1 ? '' : 's'} at ${d.address}. Click one to reuse it.`
-      : `No content atoms found at ${d.address} yet.`
+    await scanMyAtoms(false)
   } catch (e) { $('tlImportStatus').textContent = 'Lookup failed — is the server running? ' + e.message }
   finally { $('tlMyAtomsBtn').disabled = false }
 }
 $('tlMyAtomsBtn').onclick = myAtoms
-loadCreatorId()
 $('tlAdd').onclick = () => addTlRow()
 $('tlDownload').onclick = downloadCue
 $('tlBmf').onclick = downloadBmf
