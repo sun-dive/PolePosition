@@ -312,27 +312,50 @@
   </div>
 
   <div id="videoModal" class="modal" hidden>
-    <div class="modal-box" style="max-width:540px">
+    <div class="modal-box" style="max-width:1040px; width:min(96vw,1040px)">
       <div class="modal-head"><b>🎥 Video → looping WebP / MP4</b><button id="videoClose" class="ghost" type="button">✕</button></div>
-      <p class="dim" style="font-size:12px; margin:0 0 10px">Downsize a clip (MP4/MOV/WebM) <b>or an existing animated WebP</b> to <b>16:9</b> or <b>1:1</b>. <b>WebP</b> = small looping <b>cover card</b> for on-chain (keeps native timing). <b>MP4</b> = a high-res, watermarked, <b>constant-frame-rate</b> promo source for Kdenlive/social (editors mishandle WebP's variable timing; audio you add in the editor). <b>Keep it short</b> — length drives file size most.</p>
-      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px">
+      <p class="dim" style="font-size:12px; margin:0 0 10px"><b>WebP</b> = small looping <b>cover card</b> for on-chain (native timing). <b>MP4</b> = high-res, watermarked, <b>constant-frame-rate</b> promo source for Kdenlive/social (editors mishandle WebP's variable timing; add audio in the editor). <b>Keep it short</b> — length drives file size most.</p>
+      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
         <label class="ghost" style="cursor:pointer">🎬 Choose video or WebP<input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,image/webp,.mp4,.mov,.webm,.mkv,.webp" hidden></label>
         <span id="videoName" class="dim" style="font-size:12px"></span>
       </div>
-      <div class="row" style="gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; font-size:12px">
-        <label style="display:flex; flex-direction:column; gap:3px">Output
+
+      <!-- previews at the top of two aligned columns -->
+      <div class="vid-previews">
+        <div class="vid-col">
+          <div class="vid-cap dim">Source</div>
+          <div class="vid-frame">
+            <img id="videoSrcImg" alt="source preview" hidden />
+            <video id="videoSrcVid" muted loop playsinline autoplay hidden></video>
+            <span id="videoSrcEmpty" class="dim">No source loaded yet.</span>
+          </div>
+        </div>
+        <div class="vid-col">
+          <div class="vid-cap dim">Result</div>
+          <div class="vid-frame">
+            <img id="videoImg" alt="export preview" hidden />
+            <video id="videoVid" controls loop muted playsinline hidden></video>
+            <span id="videoResultEmpty" class="dim">Your export appears here.</span>
+          </div>
+          <div id="videoResultActions" class="cover-actions" hidden style="margin-top:6px; align-items:center; gap:8px"><button id="videoDownload" class="ghost" type="button">Download</button><span id="videoInfo" class="dim" style="font-size:12px"></span></div>
+        </div>
+      </div>
+      <div id="videoSyncRow" hidden style="text-align:center; margin:-4px 0 12px"><button id="videoSync" class="ghost" type="button">🔄 Sync loops</button> <span class="dim" style="font-size:11px">restart both together to compare</span></div>
+
+      <div class="vid-controls">
+        <label class="ctl">Output
           <select id="videoFormat">
-            <option value="webp">WebP (on-chain cover)</option>
-            <option value="mp4">MP4 (promo / editor)</option>
+            <option value="webp">WebP · cover</option>
+            <option value="mp4">MP4 · promo</option>
           </select>
         </label>
-        <label style="display:flex; flex-direction:column; gap:3px">Shape
+        <label class="ctl">Shape
           <select id="videoAspect">
-            <option value="16:9">16:9 (wide)</option>
-            <option value="1:1">1:1 (square)</option>
+            <option value="16:9">16:9 wide</option>
+            <option value="1:1">1:1 square</option>
           </select>
         </label>
-        <label style="display:flex; flex-direction:column; gap:3px">Frame rate
+        <label class="ctl">Frame rate
           <select id="videoFps">
             <option value="30">30 fps</option>
             <option value="24">24 fps</option>
@@ -341,32 +364,33 @@
             <option value="5">5 fps</option>
           </select>
         </label>
-        <label style="display:flex; flex-direction:column; gap:3px">Width
+        <label class="ctl">Width
           <select id="videoWidth">
             <option value="320">320 px</option>
             <option value="384">384 px</option>
             <option value="480" selected>480 px</option>
             <option value="512">512 px</option>
             <option value="640">640 px</option>
-            <option value="1280">1280 (720p)</option>
-            <option value="1920">1920 (1080p)</option>
+            <option value="1280">720p</option>
+            <option value="1920">1080p</option>
           </select>
         </label>
-        <label style="display:flex; flex-direction:column; gap:3px">Quality
+        <label class="ctl">Quality
           <select id="videoQ">
-            <option value="40">40 (small)</option>
+            <option value="40">40 small</option>
             <option value="55" selected>55</option>
-            <option value="70">70 (sharper)</option>
-            <option value="lossless">Lossless (largest)</option>
+            <option value="70">70 sharp</option>
+            <option value="lossless">Lossless</option>
           </select>
         </label>
       </div>
-      <div class="row" id="videoWmRow" style="gap:12px 14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; font-size:12px; border-top:1px solid rgba(255,255,255,.08); padding-top:10px">
+
+      <div id="videoWmRow" class="vid-controls" style="border-top:1px solid rgba(255,255,255,.08); padding-top:12px">
         <label style="display:flex; align-items:center; gap:6px; cursor:pointer; align-self:center"><input id="videoWmOn" type="checkbox"> 💧 Watermark</label>
         <img id="videoWmThumb" alt="" style="height:22px; background:#0b0e13; border-radius:3px; padding:2px 4px; align-self:center" hidden>
         <span id="videoWmName" class="dim" style="align-self:center"></span>
         <label class="ghost" style="cursor:pointer; font-size:12px; align-self:center">Choose brand PNG…<input id="videoWmFile" type="file" accept="image/png,image/webp,.png,.webp" hidden></label>
-        <label style="display:flex; flex-direction:column; gap:3px">Position
+        <label class="ctl">Position
           <select id="videoWmPos">
             <option value="se">Bottom-right</option>
             <option value="sw">Bottom-left</option>
@@ -376,7 +400,7 @@
             <option value="center">Center</option>
           </select>
         </label>
-        <label style="display:flex; flex-direction:column; gap:3px">Size
+        <label class="ctl">Size
           <select id="videoWmSize">
             <option value="10">10%</option>
             <option value="15">15%</option>
@@ -385,14 +409,10 @@
           </select>
         </label>
       </div>
+
       <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
         <button id="videoBuild" class="ai-btn" type="button">🎥 Make WebP loop</button>
         <span id="videoStatus" class="dim" style="font-size:12px"></span>
-      </div>
-      <div id="videoResult" hidden style="margin-top:10px">
-        <img id="videoImg" alt="looping webp preview" style="max-width:100%; border-radius:6px; background:#0b0e13" />
-        <video id="videoVid" controls loop muted playsinline hidden style="max-width:100%; border-radius:6px; background:#0b0e13"></video>
-        <div class="cover-actions" style="margin-top:6px; align-items:center; gap:8px"><button id="videoDownload" class="ghost" type="button">Download</button><span id="videoInfo" class="dim" style="font-size:12px"></span></div>
       </div>
     </div>
   </div>

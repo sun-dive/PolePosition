@@ -96,6 +96,16 @@ body.rich-mode .rich-editor {
 .modal[hidden] { display: none; }
 .modal-box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; width: 100%; max-width: 460px; max-height: 90vh; overflow: auto; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+/* 🎥 Video→WebP/MP4 modal: two aligned preview columns on top, tidy fixed-width control grid below */
+#videoModal .vid-previews { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
+#videoModal .vid-col { flex: 1 1 340px; min-width: 280px; display: flex; flex-direction: column; }
+#videoModal .vid-cap { font-size: 12px; margin-bottom: 6px; }
+#videoModal .vid-frame { border: 1px solid rgba(255,255,255,.10); border-radius: 8px; background: #0b0e13; min-height: 200px; display: flex; align-items: center; justify-content: center; padding: 8px; overflow: hidden; }
+#videoModal .vid-frame img:not([hidden]), #videoModal .vid-frame video:not([hidden]) { display: block; max-width: 100%; width: auto; height: auto; max-height: 46vh; border-radius: 4px; }
+#videoModal .vid-controls { display: flex; flex-wrap: wrap; gap: 12px 14px; align-items: flex-end; font-size: 12px; margin-bottom: 12px; }
+#videoModal .vid-controls .ctl { display: flex; flex-direction: column; gap: 3px; width: 132px; }
+#videoModal .vid-controls .ctl select { width: 100%; }
+#videoModal select { background: var(--bg); border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 5px 8px; font: inherit; }
 /* Book Factory — editable outline list + draft progress */
 .brief-ch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .brief-ch { display: grid; grid-template-columns: 22px 1fr auto; gap: 6px 8px; align-items: start; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }

@@ -1514,11 +1514,34 @@ $('flacEncode').onclick = async () => {
 }
 
 /* ---- 🎥 Video → looping animated WebP: downsize a trimmed MP4/MOV for on-chain motion content ---- */
-let videoFile = null, videoResultData = '', videoResultFmt = 'webp'
+let videoFile = null, videoResultData = '', videoResultFmt = 'webp', videoSrcUrl = ''
 $('btnVideo').onclick = () => { $('videoModal').hidden = false; loadWatermark() }
 $('videoClose').onclick = () => { $('videoModal').hidden = true }
 $('videoModal').addEventListener('click', e => { if (e.target === $('videoModal')) $('videoModal').hidden = true })
-$('videoInput').onchange = () => { videoFile = $('videoInput').files[0] || null; $('videoName').textContent = videoFile ? videoFile.name : ''; $('videoStatus').textContent = ''; $('videoResult').hidden = true }
+$('videoInput').onchange = () => {
+  videoFile = $('videoInput').files[0] || null
+  $('videoName').textContent = videoFile ? videoFile.name : ''
+  $('videoStatus').textContent = ''
+  // reset the result panel
+  $('videoImg').hidden = true; $('videoImg').removeAttribute('src')
+  $('videoVid').hidden = true; $('videoVid').removeAttribute('src')
+  $('videoResultEmpty').hidden = false; $('videoResultActions').hidden = true; $('videoSyncRow').hidden = true
+  // Source thumbnail: animated WebP → <img> (browsers render it); video file → <video>.
+  if (videoSrcUrl) { URL.revokeObjectURL(videoSrcUrl); videoSrcUrl = '' }
+  const img = $('videoSrcImg'), vid = $('videoSrcVid'), empty = $('videoSrcEmpty')
+  if (videoFile) {
+    videoSrcUrl = URL.createObjectURL(videoFile)
+    const isWebp = /\.webp$/i.test(videoFile.name) || videoFile.type === 'image/webp'
+    empty.hidden = true
+    if (isWebp) { vid.hidden = true; vid.removeAttribute('src'); img.hidden = false; img.src = videoSrcUrl }
+    else { img.hidden = true; img.removeAttribute('src'); vid.hidden = false; vid.src = videoSrcUrl; vid.play?.().catch(() => {}) }
+  } else { img.hidden = true; vid.hidden = true; empty.hidden = false }
+}
+// Sync loops for A/B compare: animated WebP <img> has no seek API, so re-assign src to restart from frame 0.
+// The WebP result keeps the source's native per-frame timing, so restarting both together keeps them in lockstep.
+function restartImg (img) { if (img.hidden) return; const s = img.getAttribute('src'); if (!s) return; img.removeAttribute('src'); void img.offsetWidth; img.src = s }
+function syncLoops () { restartImg($('videoSrcImg')); restartImg($('videoImg')) }
+$('videoSync').onclick = syncLoops
 
 /* ---- Cover watermark: pick a brand PNG once, reused consistently on every cover ---- */
 let wmSet = false // is a watermark image on file?
@@ -1564,9 +1587,14 @@ $('videoBuild').onclick = async () => {
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('videoStatus').textContent = data.error || ('Error ' + r.status); return }
     videoResultData = data.dataUrl; videoResultFmt = data.format || fmt
-    $('videoResult').hidden = false
-    if (videoResultFmt === 'mp4') { $('videoImg').hidden = true; $('videoVid').hidden = false; $('videoVid').src = videoResultData; $('videoVid').play?.().catch(() => {}) }
-    else { $('videoVid').hidden = true; $('videoVid').removeAttribute('src'); $('videoImg').hidden = false; $('videoImg').src = videoResultData }
+    $('videoResultEmpty').hidden = true; $('videoResultActions').hidden = false
+    if (videoResultFmt === 'mp4') { $('videoImg').hidden = true; $('videoImg').removeAttribute('src'); $('videoVid').hidden = false; $('videoVid').src = videoResultData; $('videoVid').play?.().catch(() => {}); $('videoSyncRow').hidden = true }
+    else { $('videoVid').hidden = true; $('videoVid').removeAttribute('src'); $('videoImg').hidden = false; $('videoImg').src = videoResultData
+      // WebP result: if the source is also an animated WebP, offer + auto-run loop sync for A/B compare
+      const canSync = !$('videoSrcImg').hidden
+      $('videoSyncRow').hidden = !canSync
+      if (canSync) setTimeout(syncLoops, 60) // let the result img attach first, then restart both together
+    }
     const kb = data.size / 1024, mb = data.size / 1048576
     const sizeStr = mb >= 1 ? mb.toFixed(2) + ' MB' : Math.round(kb) + ' KB'
     $('videoInfo').textContent = `${data.width}×${data.height} · ${data.fps} fps · ${data.frames} frames · ${(data.duration || 0).toFixed(1)}s · ${sizeStr}${data.watermarked ? ' · 💧 watermarked' : ''}`
