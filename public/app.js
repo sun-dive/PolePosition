@@ -1537,10 +1537,18 @@ $('videoInput').onchange = () => {
     else { img.hidden = true; img.removeAttribute('src'); vid.hidden = false; vid.src = videoSrcUrl; vid.play?.().catch(() => {}) }
   } else { img.hidden = true; vid.hidden = true; empty.hidden = false }
 }
-// Sync loops for A/B compare: animated WebP <img> has no seek API, so re-assign src to restart from frame 0.
-// The WebP result keeps the source's native per-frame timing, so restarting both together keeps them in lockstep.
-function restartImg (img) { if (img.hidden) return; const s = img.getAttribute('src'); if (!s) return; img.removeAttribute('src'); void img.offsetWidth; img.src = s }
-function syncLoops () { restartImg($('videoSrcImg')); restartImg($('videoImg')) }
+// Sync loops for A/B compare. <video> seeks to 0; animated-WebP <img> has no seek API so re-assign src to
+// restart from frame 0. Source + result share the same total loop length, so restarting both together keeps
+// them aligned. Handles any pair — img↔img (WebP/WebP), img↔video (WebP/MP4), video↔video.
+function restartEl (el) {
+  if (!el || el.hidden) return
+  if (el.tagName === 'VIDEO') { try { el.currentTime = 0 } catch { /* not seekable yet */ } el.play?.().catch(() => {}); return }
+  const s = el.getAttribute('src'); if (!s) return; el.removeAttribute('src'); void el.offsetWidth; el.src = s
+}
+function syncLoops () {
+  restartEl($('videoSrcImg').hidden ? $('videoSrcVid') : $('videoSrcImg'))
+  restartEl($('videoImg').hidden ? $('videoVid') : $('videoImg'))
+}
 $('videoSync').onclick = syncLoops
 
 /* ---- Cover watermark: pick a brand PNG once, reused consistently on every cover ---- */
@@ -1588,13 +1596,12 @@ $('videoBuild').onclick = async () => {
     if (!r.ok) { $('videoStatus').textContent = data.error || ('Error ' + r.status); return }
     videoResultData = data.dataUrl; videoResultFmt = data.format || fmt
     $('videoResultEmpty').hidden = true; $('videoResultActions').hidden = false
-    if (videoResultFmt === 'mp4') { $('videoImg').hidden = true; $('videoImg').removeAttribute('src'); $('videoVid').hidden = false; $('videoVid').src = videoResultData; $('videoVid').play?.().catch(() => {}); $('videoSyncRow').hidden = true }
-    else { $('videoVid').hidden = true; $('videoVid').removeAttribute('src'); $('videoImg').hidden = false; $('videoImg').src = videoResultData
-      // WebP result: if the source is also an animated WebP, offer + auto-run loop sync for A/B compare
-      const canSync = !$('videoSrcImg').hidden
-      $('videoSyncRow').hidden = !canSync
-      if (canSync) setTimeout(syncLoops, 60) // let the result img attach first, then restart both together
-    }
+    if (videoResultFmt === 'mp4') { $('videoImg').hidden = true; $('videoImg').removeAttribute('src'); $('videoVid').hidden = false; $('videoVid').src = videoResultData; $('videoVid').play?.().catch(() => {}) }
+    else { $('videoVid').hidden = true; $('videoVid').removeAttribute('src'); $('videoImg').hidden = false; $('videoImg').src = videoResultData }
+    // offer + auto-run loop sync whenever a source preview is present (works across img/video pairings)
+    const hasSrc = !$('videoSrcImg').hidden || !$('videoSrcVid').hidden
+    $('videoSyncRow').hidden = !hasSrc
+    if (hasSrc) setTimeout(syncLoops, 80) // let the result element attach first, then restart both together
     const kb = data.size / 1024, mb = data.size / 1048576
     const sizeStr = mb >= 1 ? mb.toFixed(2) + ' MB' : Math.round(kb) + ' KB'
     $('videoInfo').textContent = `${data.width}×${data.height} · ${data.fps} fps · ${data.frames} frames · ${(data.duration || 0).toFixed(1)}s · ${sizeStr}${data.watermarked ? ' · 💧 watermarked' : ''}`
