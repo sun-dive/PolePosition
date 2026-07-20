@@ -539,21 +539,24 @@ async function reencodeWebp (inPath, { width, height, fps, quality = 80, lossles
 
 // Composite a static watermark PNG onto EVERY frame of an animated (or static) WebP, preserving per-frame
 // timing. `pos` = corner/edge (nw n ne w center e sw s se); `sizePct`/`marginPct` = watermark width / inset
-// as a % of the cover's width (so one watermark looks consistent across 512 / 400 / 256 covers). The PNG's
-// own alpha (e.g. a baked-in halo) is respected. Returns a new WebP path; the caller reads + unlinks it.
-async function watermarkWebp (inPath, wmPath, { pos = 'se', sizePct = 15, marginPct = 3, quality = 80, lossless = false }) {
+// as a % of the cover's width (so one watermark looks consistent across 512 / 400 / 256 covers). Optional
+// `width`+`height` crop-to-fit the frames FIRST, so resize + watermark + encode happen in ONE lossy pass
+// (no double re-encode). The PNG's own alpha (e.g. a baked-in halo) is respected. Returns a new WebP path.
+async function watermarkWebp (inPath, wmPath, { pos = 'se', sizePct = 15, marginPct = 3, quality = 80, lossless = false, width = 0, height = 0 }) {
   const G = { nw: 'NorthWest', n: 'North', ne: 'NorthEast', w: 'West', center: 'Center', e: 'East', sw: 'SouthWest', s: 'South', se: 'SouthEast' }[pos] || 'SouthEast'
   const base = join(tmpdir(), 'pp-wm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
   const dir = base + '-f'; await mkdir(dir, { recursive: true })
   const out = base + '.webp'
   try {
-    const sz = await clipSize(inPath) || { w: 512, h: 512 }
+    // crop-to-fit to WxH when given (single-pass resize), else keep native size.
+    const resize = (width && height) ? ['-resize', `${width}x${height}^`, '-gravity', 'center', '-extent', `${width}x${height}`] : []
+    const sz = (width && height) ? { w: width, h: height } : (await clipSize(inPath) || { w: 512, h: 512 })
     const wmW = Math.max(8, Math.round(sz.w * Math.min(Math.max(sizePct, 1), 80) / 100))
     const mg = Math.round(sz.w * Math.min(Math.max(marginPct, 0), 25) / 100)
     const geom = pos === 'center' ? '+0+0' : `+${mg}+${mg}`
     const wmScaled = base + '-wm.png'
     await runCmd('magick', [wmPath, '-resize', wmW + 'x', wmScaled])
-    await runCmd('magick', [inPath, '-coalesce', join(dir, 'wf-%04d.png')])
+    await runCmd('magick', [inPath, '-coalesce', ...resize, join(dir, 'wf-%04d.png')])
     const files = (await readdir(dir)).filter(f => f.startsWith('wf-')).sort()
     if (!files.length) throw new Error('could not read frames')
     const qDef = lossless ? ['-define', 'webp:lossless=true'] : ['-quality', String(quality)]
@@ -1091,10 +1094,15 @@ const server = createServer(async (req, res) => {
       // Animated WebP can't be read by ffmpeg — crop/resize it via ImageMagick instead, keeping its NATIVE
       // (variable) frame timing. Lets this tool turn an existing atom/loop into a 16:9 or 1:1 cover.
       if (isWebp) {
-        const dataUrl0 = await reencodeWebp(inPath, { width: W, height: H, fps: 0, quality: q, lossless })
-        let raw = Buffer.from(dataUrl0.slice(dataUrl0.indexOf(',') + 1), 'base64')
-        await writeFile(outPath, raw)
-        if (wmOn) { const wmOut = await watermarkWebp(outPath, WM_FILE, wmOpts); raw = await readFile(wmOut); await writeFile(outPath, raw); await unlink(wmOut).catch(() => {}) }
+        let raw
+        if (wmOn) {
+          // single pass: crop-to-fit + watermark + encode straight from the source (no intermediate re-encode)
+          const wmOut = await watermarkWebp(inPath, WM_FILE, { ...wmOpts, width: W, height: H })
+          raw = await readFile(wmOut); await unlink(wmOut).catch(() => {}); await writeFile(outPath, raw)
+        } else {
+          const dataUrl0 = await reencodeWebp(inPath, { width: W, height: H, fps: 0, quality: q, lossless })
+          raw = Buffer.from(dataUrl0.slice(dataUrl0.indexOf(',') + 1), 'base64'); await writeFile(outPath, raw)
+        }
         let frames = 0, duration = 0
         try {
           const delays = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).map(n => parseInt(n, 10) || 0)
@@ -1104,10 +1112,19 @@ const server = createServer(async (req, res) => {
       }
       // cover-crop: scale up to fill WxH (keeping the source aspect), then centre-crop to exactly WxH — robust
       // for any input shape (16:9 in → no crop; other shapes → trimmed to the chosen frame), then drop the fps.
-      const vf = `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`
+      // Watermark (if on) is overlaid in the SAME ffmpeg pass — no second re-encode.
+      const chain = `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`
       const encArgs = lossless ? ['-lossless', '1', '-q:v', '100'] : ['-lossless', '0', '-q:v', String(q)]
-      await runFfmpeg(['-y', '-i', inPath, '-vcodec', 'libwebp', '-vf', vf, '-loop', '0', ...encArgs, '-compression_level', '6', '-an', outPath])
-      if (wmOn) { const wmOut = await watermarkWebp(outPath, WM_FILE, wmOpts); const wb = await readFile(wmOut); await writeFile(outPath, wb); await unlink(wmOut).catch(() => {}) }
+      const wArgs = ['-y', '-i', inPath]
+      if (wmOn) {
+        const wmW = Math.max(8, Math.round(W * Math.min(Math.max(wmOpts.sizePct, 1), 80) / 100))
+        const mg = Math.round(W * Math.min(Math.max(wmOpts.marginPct, 0), 25) / 100)
+        await runCmd('magick', [WM_FILE, '-resize', wmW + 'x', wmvPath])
+        const ov = { se: `W-w-${mg}:H-h-${mg}`, sw: `${mg}:H-h-${mg}`, ne: `W-w-${mg}:${mg}`, nw: `${mg}:${mg}`, s: `(W-w)/2:H-h-${mg}`, center: `(W-w)/2:(H-h)/2` }[wmOpts.pos] || `W-w-${mg}:H-h-${mg}`
+        wArgs.push('-i', wmvPath, '-filter_complex', `[0:v]${chain}[v];[v][1:v]overlay=${ov}`)
+      } else { wArgs.push('-vf', chain) }
+      wArgs.push('-vcodec', 'libwebp', '-loop', '0', ...encArgs, '-compression_level', '6', '-an', outPath)
+      await runFfmpeg(wArgs)
       const out = await readFile(outPath)
       let frames = 0
       try { frames = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).length } catch { /* leave 0 */ }
