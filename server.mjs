@@ -103,6 +103,26 @@ async function resolveImportRef (ref) {
     return m ? m[1].toLowerCase() : null
   } catch { return null }
 }
+// ── Immutable atom cache ──────────────────────────────────────────────────────────────────────────
+// Atoms are content-addressed by txid, so a cached copy is valid FOREVER (never invalidates) and can be
+// shared across every project. Two layers, both under ~/.poleposition/atom-cache/:
+//   • content   — <txid>.bin (decoded bytes) + <txid>.json (meta): skip re-fetch/decrypt on reuse.
+//   • discovery — list-<address>.json (txid+name+mime): render My-atoms instantly; refresh only NEW txids.
+const ATOM_CACHE_DIR = join(PP_DIR, 'atom-cache')
+async function cachedAtomGet (txid) {
+  try { return { meta: JSON.parse(await readFile(join(ATOM_CACHE_DIR, txid + '.json'), 'utf8')), buf: await readFile(join(ATOM_CACHE_DIR, txid + '.bin')) } }
+  catch { return null }
+}
+async function cachedAtomPut (txid, meta, buf) {
+  try { await mkdir(ATOM_CACHE_DIR, { recursive: true }); await writeFile(join(ATOM_CACHE_DIR, txid + '.bin'), buf); await writeFile(join(ATOM_CACHE_DIR, txid + '.json'), JSON.stringify(meta)) }
+  catch (e) { console.warn('  ⚠️  atom-cache write failed:', e.message) }
+}
+const atomsListPath = address => join(ATOM_CACHE_DIR, 'list-' + address + '.json')
+async function cachedAtomList (address) { try { return JSON.parse(await readFile(atomsListPath(address), 'utf8')) } catch { return null } }
+async function cachedAtomListPut (address, atoms) {
+  try { await mkdir(ATOM_CACHE_DIR, { recursive: true }); await writeFile(atomsListPath(address), JSON.stringify(atoms)) }
+  catch (e) { console.warn('  ⚠️  atoms-list cache write failed:', e.message) }
+}
 loadProjectsState()
 
 // HARD GUARD: never let an Anthropic API key reach the SDK — it would override the subscription and bill
@@ -783,21 +803,17 @@ const server = createServer(async (req, res) => {
     try { txid = await resolveImportRef(body.ref || body.txid) } catch (e) { return sendJson(res, 502, { error: 'could not resolve that link: ' + (e.message || 'error') }) }
     if (!txid) return sendJson(res, 400, { error: 'Paste a share link (nft.sale/r/…) or a 64-character transaction id.' })
     try {
-      const r = await importCollection(txid)
-      if (!r) return sendJson(res, 404, { error: 'No media found in that transaction — is it a PharLap content mint?' })
-      const buf = Buffer.from(r.bytes)
-      // Archive the recovered atom into the project's masters folder (so reused atoms are kept locally too).
-      let savedPath = null
-      if (CURRENT?.mastersDir) {
-        try {
-          await mkdir(CURRENT.mastersDir, { recursive: true })
-          const safe = (r.fileName || 'atom.webp').replace(/[^a-z0-9._-]/gi, '_')
-          savedPath = join(CURRENT.mastersDir, 'imported-' + txid.slice(0, 12) + '-' + safe)
-          await writeFile(savedPath, buf)
-        } catch (e) { console.warn('  ⚠️  could not archive imported atom:', e.message) }
+      let meta, buf, cached = false
+      const hit = await cachedAtomGet(txid) // immutable content → a cache hit is always valid (+ offline)
+      if (hit) { meta = hit.meta; buf = hit.buf; cached = true } else {
+        const r = await importCollection(txid)
+        if (!r) return sendJson(res, 404, { error: 'No media found in that transaction — is it a PharLap content mint?' })
+        buf = Buffer.from(r.bytes)
+        meta = { fileName: r.fileName, mimeType: r.mimeType || 'application/octet-stream', encrypted: r.encrypted, verified: r.verified, legacy: r.legacy || null, sha256: r.sha256 }
+        if (meta.verified) await cachedAtomPut(txid, meta, buf) // only cache content that verified against the chain
       }
-      const mime = r.mimeType || 'application/octet-stream'
-      return sendJson(res, 200, { txid, fileName: r.fileName, mimeType: mime, size: buf.length, encrypted: r.encrypted, verified: r.verified, legacy: r.legacy || null, sha256: r.sha256, savedPath, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') })
+      const mime = meta.mimeType || 'application/octet-stream'
+      return sendJson(res, 200, { txid, fileName: meta.fileName, mimeType: mime, size: buf.length, encrypted: meta.encrypted, verified: meta.verified, legacy: meta.legacy || null, sha256: meta.sha256, cached, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') })
     } catch (e) {
       return sendJson(res, 502, { error: 'import failed: ' + (e.message || 'error') })
     }
@@ -816,12 +832,20 @@ const server = createServer(async (req, res) => {
     return sendJson(res, 200, { creator: identity, address: who ? who.address : null })
   }
   // ── Discover the current creator's on-chain atoms (light metadata; content fetched lazily on use) ──
+  // Cached per address. ?cached=1 → instant, no chain (for render-on-open). Default → incremental refresh:
+  // fetch address history once, scan ONLY txids not already cached, merge + persist.
   if (url.pathname === '/api/my-atoms' && req.method === 'GET') {
     const identity = CURRENT?.creator
-    if (!identity) return sendJson(res, 400, { error: 'Set your wallet address or public key for this project first.' })
+    const who = identity ? creatorIdentity(identity) : null
+    if (!who) return sendJson(res, 400, { error: 'Set your wallet address or public key for this project first.' })
     try {
-      const r = await listCreatorAtoms(identity)
-      return sendJson(res, 200, r)
+      const cachedAtoms = (await cachedAtomList(who.address)) || []
+      if (url.searchParams.get('cached') === '1') return sendJson(res, 200, { address: who.address, atoms: cachedAtoms, stale: true })
+      const known = new Set(cachedAtoms.map(a => a.txid))
+      const fresh = await listCreatorAtoms(identity, { known }) // returns only atoms whose txid is NOT in `known`
+      const atoms = cachedAtoms.concat(fresh.atoms)
+      if (fresh.atoms.length || !(await cachedAtomList(who.address))) await cachedAtomListPut(who.address, atoms)
+      return sendJson(res, 200, { address: who.address, atoms, added: fresh.atoms.length, stale: false })
     } catch (e) { return sendJson(res, 502, { error: 'atom lookup failed: ' + (e.message || 'error') }) }
   }
 

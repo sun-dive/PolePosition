@@ -1388,7 +1388,7 @@ async function doImport (ref) {
     const entry = tlLib.get(name)
     if (entry) { entry.tx = d.txid; renderLib(); refreshSceneSelects(); saveTimelineSoon() }
     const kb = Math.round(d.size / 1024)
-    const badge = d.encrypted ? (d.verified ? '🔓 decrypted + verified against the on-chain commitment ✓' : '⚠ decrypted but hash mismatch') : (d.verified ? '✓ verified exact replica' : '⚠ hash mismatch')
+    const badge = d.cached ? '⚡ from local cache' : (d.encrypted ? (d.verified ? '🔓 decrypted + verified against the on-chain commitment ✓' : '⚠ decrypted but hash mismatch') : (d.verified ? '✓ verified exact replica' : '⚠ hash mismatch'))
     $('tlImportStatus').textContent = `Imported ${name} (${kb} KB) — ${badge}. Its txid is set; reference it in the timeline.`
     $('tlImportTx').value = ''
   } catch (e) { $('tlImportStatus').textContent = 'Import failed — is the server running? ' + e.message }
@@ -1414,12 +1414,16 @@ function renderMyAtoms (atoms) {
 // (no chatty status). The creator id is already saved on the project, so this doesn't re-save.
 async function scanMyAtoms (silent) {
   try {
+    // 1) instant: render the cached list (no chain hit) so it's ready immediately on project open
+    const c = await (await fetch('/api/my-atoms?cached=1')).json().catch(() => ({}))
+    if ((c.atoms || []).length) renderMyAtoms(c.atoms)
+    // 2) refresh: incremental scan — only NEW mints touch the chain
     const r = await fetch('/api/my-atoms'); const d = await r.json().catch(() => ({}))
-    if (!r.ok) { if (!silent) $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
+    if (!r.ok) { if (!silent && !(c.atoms || []).length) $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
     renderMyAtoms(d.atoms || [])
-    const n = (d.atoms || []).length
-    if (!silent) $('tlImportStatus').textContent = n ? `Found ${n} atom${n === 1 ? '' : 's'} at ${d.address}. Click one to reuse it.` : `No content atoms found at ${d.address} yet.`
-    else if (n) $('tlImportStatus').textContent = `${n} atom${n === 1 ? '' : 's'} ready — 🔍 My atoms below.`
+    const n = (d.atoms || []).length, added = d.added ? ` (+${d.added} new)` : ''
+    if (!silent) $('tlImportStatus').textContent = n ? `Found ${n} atom${n === 1 ? '' : 's'} at ${d.address}${added}. Click one to reuse it.` : `No content atoms found at ${d.address} yet.`
+    else if (n) $('tlImportStatus').textContent = `${n} atom${n === 1 ? '' : 's'} ready${added} — 🔍 My atoms below.`
   } catch (e) { if (!silent) $('tlImportStatus').textContent = 'Lookup failed — is the server running? ' + e.message }
 }
 async function myAtoms () {
@@ -1454,7 +1458,7 @@ $('tlAudioImport').onclick = async () => {
     setSong(new File([blob], d.fileName || 'song.mp3', { type: d.mimeType || blob.type }))
     tlAudioTx = d.txid; $('tlAudioTx').value = d.txid; $('tlAudioTx').classList.add('ok'); saveTimelineSoon()
     const mb = d.size / 1048576, sz = mb >= 1 ? mb.toFixed(1) + ' MB' : Math.round(d.size / 1024) + ' KB'
-    $('tlStatus').textContent = `Loaded ${d.fileName} (${sz})${d.legacy ? ' · legacy ' + d.legacy : ''} from chain — referenced by txid in the .bmf.`
+    $('tlStatus').textContent = `Loaded ${d.fileName} (${sz})${d.legacy ? ' · legacy ' + d.legacy : ''} ${d.cached ? '⚡ from cache' : 'from chain'} — referenced by txid in the .bmf.`
   } catch (e) { $('tlStatus').textContent = 'Import failed — is the server running? ' + e.message }
   finally { $('tlAudioImport').disabled = false }
 }
