@@ -1427,6 +1427,24 @@ $('tlAdd').onclick = () => addTlRow()
 $('tlDownload').onclick = downloadCue
 $('tlBmf').onclick = downloadBmf
 $('tlAudioTx').oninput = () => { tlAudioTx = $('tlAudioTx').value.trim(); $('tlAudioTx').classList.toggle('ok', /^[0-9a-f]{64}$/i.test(tlAudioTx)); saveTimelineSoon() }
+// ⬇ from mint: fetch the on-chain song by the txid/link on the left → load it as the timeline's song + set its txid.
+$('tlAudioImport').onclick = async () => {
+  const ref = ($('tlAudioTx').value || '').trim()
+  if (!ref) { $('tlStatus').textContent = "Paste the song's on-chain txid or share link first."; return }
+  $('tlAudioImport').disabled = true; $('tlStatus').textContent = 'Fetching the song from chain (large files take a moment)…'
+  try {
+    const r = await fetch('/api/import-mint', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref }) })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) { $('tlStatus').textContent = d.error || ('Error ' + r.status); return }
+    if (!/^audio\//.test(d.mimeType || '')) { $('tlStatus').textContent = `That mint is ${d.mimeType || 'not audio'} — use ⛓ Import from mint for a video clip.`; return }
+    const blob = await (await fetch(d.dataUrl)).blob()
+    setSong(new File([blob], d.fileName || 'song.mp3', { type: d.mimeType || blob.type }))
+    tlAudioTx = d.txid; $('tlAudioTx').value = d.txid; $('tlAudioTx').classList.add('ok'); saveTimelineSoon()
+    const mb = d.size / 1048576, sz = mb >= 1 ? mb.toFixed(1) + ' MB' : Math.round(d.size / 1024) + ' KB'
+    $('tlStatus').textContent = `Loaded ${d.fileName} (${sz})${d.legacy ? ' · legacy ' + d.legacy : ''} from chain — referenced by txid in the .bmf.`
+  } catch (e) { $('tlStatus').textContent = 'Import failed — is the server running? ' + e.message }
+  finally { $('tlAudioImport').disabled = false }
+}
 $('tlLicense').onchange = saveTimelineSoon
 $('tlAttribution').oninput = saveTimelineSoon
 $('tlClear').onclick = clearAllTimeline

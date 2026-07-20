@@ -9,6 +9,44 @@ import { parseFileScript, parseTemplateScript, decodeTokenRules } from './tokenC
 import { unwrapContentKey, decryptContent } from './contentCrypto.ts'
 import { decompress } from './compress.ts'
 
+// ── Legacy plaintext file format (the original on-chain provenance mints) ──
+// Encoding: OP_FALSE OP_RETURN, then pushdata fields [<marker>, <mime>, <fileName>, <data…>] where the marker
+// is "MPT-FILE" (Merkle-Proof-Token generation) or "P-FILE" (the P-protocol generation) — plaintext,
+// unencrypted, self-authenticating by being the on-chain tx itself. Superseded by the covenant/PushDrop
+// format, but still resolvable so an origin provenance mint can be reused in a BMF composition.
+const LEGACY_FILE_MARKERS = new Set(['MPT-FILE', 'P-FILE'])
+function readPush (bytes, i) {
+  const op = bytes[i++]
+  let len
+  if (op >= 0x01 && op <= 0x4b) len = op
+  else if (op === 0x4c) len = bytes[i++]
+  else if (op === 0x4d) { len = bytes[i] | (bytes[i + 1] << 8); i += 2 }
+  else if (op === 0x4e) { len = bytes[i] + bytes[i + 1] * 0x100 + bytes[i + 2] * 0x10000 + bytes[i + 3] * 0x1000000; i += 4 }
+  else return null // not a pushdata opcode
+  if (i + len > bytes.length) return null
+  return { data: bytes.slice(i, i + len), next: i + len }
+}
+function decodeMptFile (scriptBytes) {
+  let i = 0
+  if (scriptBytes[i] === 0x00) i++ // optional OP_FALSE
+  if (scriptBytes[i] !== 0x6a) return null // OP_RETURN
+  i++
+  const fields = []
+  while (i < scriptBytes.length) { const r = readPush(scriptBytes, i); if (!r) break; fields.push(r.data); i = r.next }
+  if (fields.length < 4 || !LEGACY_FILE_MARKERS.has(Utils.toUTF8(fields[0]))) return null
+  const bytes = []
+  for (const f of fields.slice(3)) for (const b of f) bytes.push(b) // concat remaining pushes = the file
+  return { fileName: Utils.toUTF8(fields[2]), mimeType: Utils.toUTF8(fields[1]), bytes, marker: Utils.toUTF8(fields[0]).toLowerCase() }
+}
+// Find an MPT-FILE payload across a tx's outputs (null if none).
+function mptFileFromTx (tx) {
+  for (const o of tx.outputs) {
+    const mpt = decodeMptFile(o.lockingScript.toBinary())
+    if (mpt) return mpt
+  }
+  return null
+}
+
 // Raw tx hex. BananaBlocks-primary + WoC-fallback would slot in here; WoC for now.
 async function fetchRawTxHex (txid) {
   const r = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`)
@@ -27,7 +65,12 @@ export async function importCollection (txid, { fetchHex = fetchRawTxHex } = {})
     const f = parseFileScript(o.lockingScript); if (f) file = f.fields
     const t = parseTemplateScript(o.lockingScript); if (t) template = t.fields
   }
-  if (!file) return null
+  if (!file) {
+    // Legacy MPT-FILE fallback (plaintext, unencrypted; authentic by being the on-chain tx itself).
+    const mpt = mptFileFromTx(tx)
+    if (mpt) return { fileName: mpt.fileName, mimeType: mpt.mimeType, bytes: mpt.bytes, encrypted: false, verified: true, legacy: mpt.marker, sha256: Utils.toHex(Hash.sha256(mpt.bytes)), rules: { legacy: mpt.marker } }
+    return null
+  }
   const rules = template != null ? decodeTokenRules(template.tokenRules) : null
   const encrypted = rules?.isEncrypted ?? false
   let bytes = file.fileBytes
@@ -75,6 +118,7 @@ export async function listCreatorAtoms (identity, { fetchHistory = fetchAddressH
       const tx = Transaction.fromHex(await fetchHex(txid))
       let file = null
       for (const o of tx.outputs) { const f = parseFileScript(o.lockingScript); if (f) { file = f.fields; break } }
+      if (!file) { const mpt = mptFileFromTx(tx); if (mpt) file = { fileName: mpt.fileName, mimeType: mpt.mimeType } } // legacy MPT-FILE atoms too
       if (file) atoms.push({ txid, fileName: file.fileName, mimeType: file.mimeType }) // a collection carries content; editions/payments don't
     } catch { /* skip anything that isn't a parseable content collection */ }
   }

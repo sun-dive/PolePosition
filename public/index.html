@@ -210,7 +210,8 @@
         <label class="ghost" style="cursor:pointer" title="Re-open a saved project: scenes + song + timeline">⬆ Restore bundle<input id="tlLoadBundle" type="file" accept=".zip,application/zip" hidden></label>
         <label class="ghost" style="cursor:pointer" title="Rebuild the timeline from a video.cue (add your scene clips first)">⬆ Load cue<input id="tlLoadCue" type="file" accept=".cue,.lrc,.txt,text/plain" hidden></label>
         <span id="tlAudioName" class="dim" style="font-size:12px"></span>
-        <input id="tlAudioTx" class="tl-lib-tx" type="text" spellcheck="false" placeholder="⛓ song's on-chain txid (optional — for .bmf)" title="The genesis txid of the song's on-chain mint. Set it and the .bmf references the audio on-chain (e.g. your original Supersonic mp3)." style="flex:1 1 260px" />
+        <input id="tlAudioTx" class="tl-lib-tx" type="text" spellcheck="false" placeholder="⛓ song's on-chain txid or share link (for .bmf)" title="The genesis txid (or share link) of the song's on-chain mint. Set it and the .bmf references the audio on-chain (e.g. your original MPT Supersonic mp3). Click ⬇ from mint to also load the audio itself." style="flex:1 1 260px" />
+        <button id="tlAudioImport" class="ghost" type="button" title="Fetch the on-chain song by the txid/link on the left, load it as the timeline's song, and set its txid — supports legacy MPT-FILE / P-FILE mints too">⬇ from mint</button>
       </div>
       <audio id="tlPlayer" controls style="width:100%; margin-bottom:10px; display:none"></audio>
       <div class="tl-preview"><img id="tlPreview" alt="scene preview" /><span id="tlPreviewHint" class="dim">Add scenes + press play to preview</span></div>

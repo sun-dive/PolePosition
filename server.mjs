@@ -797,7 +797,7 @@ const server = createServer(async (req, res) => {
         } catch (e) { console.warn('  ⚠️  could not archive imported atom:', e.message) }
       }
       const mime = r.mimeType || 'application/octet-stream'
-      return sendJson(res, 200, { txid, fileName: r.fileName, mimeType: mime, size: buf.length, encrypted: r.encrypted, verified: r.verified, sha256: r.sha256, savedPath, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') })
+      return sendJson(res, 200, { txid, fileName: r.fileName, mimeType: mime, size: buf.length, encrypted: r.encrypted, verified: r.verified, legacy: r.legacy || null, sha256: r.sha256, savedPath, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') })
     } catch (e) {
       return sendJson(res, 502, { error: 'import failed: ' + (e.message || 'error') })
     }
