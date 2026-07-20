@@ -41,6 +41,10 @@ const PROJECTS_FILE = join(PP_DIR, 'projects.json')
 let CURRENT = null // { name, mastersDir }
 let RECENT = []    // [{ name, mastersDir, opened }]  most-recent first
 let LAST_RENDER_DIR = '' // last folder a music-video render was saved to — reused as the default next time
+// Remembered cover watermark — pick a brand PNG once, it applies to every cover for consistent branding.
+// The PNG itself lives at WM_FILE; the meta (name/position/size/on) persists in projects.json.
+const WM_FILE = join(PP_DIR, 'watermark.png')
+let WM = { name: '', pos: 'se', size: 15, margin: 3, enabled: false } // size/margin = % of cover width
 const slug = (s, n = 48) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, n)
 const expandTilde = p => { p = String(p || '').trim(); return p.startsWith('~') ? join(homedir(), p.slice(1).replace(/^[/\\]+/, '')) : p }
 function loadProjectsState () {
@@ -50,10 +54,14 @@ function loadProjectsState () {
     RECENT = Array.isArray(s.recent) ? s.recent.filter(p => p && p.name && p.mastersDir) : []
     if (s.current) { const c = RECENT.find(p => p.name === s.current); if (c) CURRENT = { name: c.name, mastersDir: c.mastersDir, renderDir: c.renderDir || '' } }
     if (typeof s.lastRenderDir === 'string') LAST_RENDER_DIR = s.lastRenderDir
+    if (s.watermark && typeof s.watermark === 'object') {
+      WM = { name: String(s.watermark.name || ''), pos: s.watermark.pos || 'se', size: Number(s.watermark.size) || 15, margin: Number(s.watermark.margin) || 3, enabled: !!s.watermark.enabled }
+      if (!existsSync(WM_FILE)) WM.enabled = false // meta without the PNG → disabled
+    }
   } catch (e) { console.warn('  ⚠️  projects.json unreadable — starting fresh:', e.message) }
 }
 async function persistProjects () {
-  try { await mkdir(PP_DIR, { recursive: true }); await writeFile(PROJECTS_FILE, JSON.stringify({ current: CURRENT?.name || null, recent: RECENT, lastRenderDir: LAST_RENDER_DIR }, null, 2)) }
+  try { await mkdir(PP_DIR, { recursive: true }); await writeFile(PROJECTS_FILE, JSON.stringify({ current: CURRENT?.name || null, recent: RECENT, lastRenderDir: LAST_RENDER_DIR, watermark: WM }, null, 2)) }
   catch (e) { console.warn('  ⚠️  could not save projects.json:', e.message) }
 }
 // Expand a leading ~ and fall back to ~/PolePosition/<slug>-masters when no folder is given.
@@ -529,8 +537,89 @@ async function reencodeWebp (inPath, { width, height, fps, quality = 80, lossles
   } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); await unlink(out).catch(() => {}) }
 }
 
+// Composite a static watermark PNG onto EVERY frame of an animated (or static) WebP, preserving per-frame
+// timing. `pos` = corner/edge (nw n ne w center e sw s se); `sizePct`/`marginPct` = watermark width / inset
+// as a % of the cover's width (so one watermark looks consistent across 512 / 400 / 256 covers). The PNG's
+// own alpha (e.g. a baked-in halo) is respected. Returns a new WebP path; the caller reads + unlinks it.
+async function watermarkWebp (inPath, wmPath, { pos = 'se', sizePct = 15, marginPct = 3, quality = 80, lossless = false }) {
+  const G = { nw: 'NorthWest', n: 'North', ne: 'NorthEast', w: 'West', center: 'Center', e: 'East', sw: 'SouthWest', s: 'South', se: 'SouthEast' }[pos] || 'SouthEast'
+  const base = join(tmpdir(), 'pp-wm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  const dir = base + '-f'; await mkdir(dir, { recursive: true })
+  const out = base + '.webp'
+  try {
+    const sz = await clipSize(inPath) || { w: 512, h: 512 }
+    const wmW = Math.max(8, Math.round(sz.w * Math.min(Math.max(sizePct, 1), 80) / 100))
+    const mg = Math.round(sz.w * Math.min(Math.max(marginPct, 0), 25) / 100)
+    const geom = pos === 'center' ? '+0+0' : `+${mg}+${mg}`
+    const wmScaled = base + '-wm.png'
+    await runCmd('magick', [wmPath, '-resize', wmW + 'x', wmScaled])
+    await runCmd('magick', [inPath, '-coalesce', join(dir, 'wf-%04d.png')])
+    const files = (await readdir(dir)).filter(f => f.startsWith('wf-')).sort()
+    if (!files.length) throw new Error('could not read frames')
+    const qDef = lossless ? ['-define', 'webp:lossless=true'] : ['-quality', String(quality)]
+    if (files.length === 1) { // static cover — one composite, plain WebP out
+      await runCmd('magick', [join(dir, files[0]), wmScaled, '-gravity', G, '-geometry', geom, '-compose', 'over', '-composite', ...qDef, out])
+      return out
+    }
+    const durs = await frameDurations(inPath)
+    const fa = []
+    for (let i = 0; i < files.length; i++) {
+      const comp = join(dir, 'c-' + String(i).padStart(4, '0') + '.png')
+      await runCmd('magick', [join(dir, files[i]), wmScaled, '-gravity', G, '-geometry', geom, '-compose', 'over', '-composite', comp])
+      const wf = join(dir, 'o-' + String(i).padStart(4, '0') + '.webp')
+      await runCmd('magick', [comp, ...qDef, wf])
+      fa.push('-frame', wf, `+${durs[i] || 100}+0+0+0-b`)
+    }
+    await runCmd('webpmux', [...fa, '-loop', '0', '-o', out])
+    return out
+  } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}) }
+}
+
 // Map a WebP-style quality (1-100, higher = better) to an x264 CRF (lower = better).
 const mp4Crf = q => Math.min(30, Math.max(15, Math.round(30 - (Number(q) || 80) * 0.16)))
+
+// Turn an animated WebP into a CONSTANT-frame-rate H.264 MP4 (Kdenlive-safe — editors mishandle our variable
+// per-frame timing), optionally with a watermark burned in. Silent (mix audio in your editor). Coalesce →
+// cover-fit to WxH → watermark each unique frame → resample the loop to a constant fps → libx264. Returns path.
+async function webpToMp4 (inPath, { width, height, fps = 30, quality = 80, wmPath = '', wmPos = 'se', wmSize = 15, wmMargin = 3 }) {
+  const base = join(tmpdir(), 'pp-wm4-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  const dir = base + '-f'; await mkdir(dir, { recursive: true })
+  const out = base + '.mp4'
+  try {
+    let W = width, H = height
+    if (!(W && H)) { const sz = await clipSize(inPath) || { w: 1280, h: 720 }; W = sz.w; H = sz.h }
+    W -= W % 2; H -= H % 2; W = Math.max(2, W); H = Math.max(2, H)
+    await runCmd('magick', [inPath, '-coalesce', '-resize', `${W}x${H}^`, '-gravity', 'center', '-extent', `${W}x${H}`, join(dir, 'u-%04d.png')])
+    let frames = (await readdir(dir)).filter(f => f.startsWith('u-')).sort().map(f => join(dir, f))
+    if (!frames.length) throw new Error('could not read frames')
+    if (wmPath && existsSync(wmPath)) { // burn the watermark onto each unique frame (cheap — before resampling)
+      const G = { nw: 'NorthWest', n: 'North', ne: 'NorthEast', w: 'West', center: 'Center', e: 'East', sw: 'SouthWest', s: 'South', se: 'SouthEast' }[wmPos] || 'SouthEast'
+      const wmW = Math.max(8, Math.round(W * Math.min(Math.max(wmSize, 1), 80) / 100))
+      const mg = Math.round(W * Math.min(Math.max(wmMargin, 0), 25) / 100)
+      const geom = wmPos === 'center' ? '+0+0' : `+${mg}+${mg}`
+      const wmScaled = base + '-wm.png'
+      await runCmd('magick', [wmPath, '-resize', wmW + 'x', wmScaled])
+      const wmFrames = []
+      for (let i = 0; i < frames.length; i++) { const o = join(dir, 'm-' + String(i).padStart(4, '0') + '.png'); await runCmd('magick', [frames[i], wmScaled, '-gravity', G, '-geometry', geom, '-compose', 'over', '-composite', o]); wmFrames.push(o) }
+      frames = wmFrames
+    }
+    const durs0 = await frameDurations(inPath)
+    const durs = frames.map((_, i) => durs0[i] || durs0[durs0.length - 1] || 100)
+    const total = durs.reduce((a, b) => a + b, 0) || frames.length * 100
+    const step = 1 / fps
+    const N = Math.max(1, Math.round(total / 1000 * fps))
+    const frameAt = ms => { const loopT = ((ms % total) + total) % total; let acc = 0; for (let i = 0; i < frames.length; i++) { acc += durs[i]; if (loopT < acc) return frames[i] } return frames[frames.length - 1] }
+    const listPath = base + '-list.txt'
+    const esc = f => f.replace(/'/g, "'\\''")
+    let txt = ''
+    for (let i = 0; i < N; i++) { const f = frameAt(i * step * 1000); txt += `file '${esc(f)}'\nduration ${step.toFixed(6)}\n` }
+    txt += `file '${esc(frameAt((N - 1) * step * 1000))}'\n` // concat demuxer repeats the last frame
+    await writeFile(listPath, txt)
+    await runFfmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-r', String(fps), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', String(mp4Crf(quality)), '-movflags', '+faststart', out])
+    await unlink(listPath).catch(() => {})
+    return out
+  } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}) }
+}
 // Flatten a music-video timeline (clips looping under a song) into ONE file at a chosen resolution + frame rate.
 // Each placement shows its clip, looping from its cue until the next cue; the video runs the song's length.
 // format 'mp4' → H.264 + AAC (with the soundtrack); 'webp' → silent animated WebP. Returns the output path.
@@ -660,7 +749,48 @@ const server = createServer(async (req, res) => {
   // ── Optimize a simple description into a rich image prompt (Claude Agent SDK, subscription) ──
   // ── Projects: current + recent, new, open ──
   if (url.pathname === '/api/project' && req.method === 'GET') {
-    return sendJson(res, 200, { current: CURRENT, recent: RECENT, home: homedir(), lastRenderDir: LAST_RENDER_DIR })
+    return sendJson(res, 200, { current: CURRENT, recent: RECENT, home: homedir(), lastRenderDir: LAST_RENDER_DIR, watermark: WM })
+  }
+
+  // ── Cover watermark: pick a brand PNG once, reuse it consistently on every cover ──
+  if (url.pathname === '/api/watermark' && req.method === 'GET') {
+    let dataUrl = null
+    try { if (existsSync(WM_FILE)) dataUrl = 'data:image/png;base64,' + (await readFile(WM_FILE)).toString('base64') } catch { /* none */ }
+    return sendJson(res, 200, { watermark: WM, dataUrl })
+  }
+  // Set the watermark image (raw PNG body) + its meta (?name=&pos=&size=&margin=). Enables it.
+  if (url.pathname === '/api/watermark' && req.method === 'POST') {
+    try {
+      const buf = await readRawBody(req, 16 * 1024 * 1024)
+      if (buf.length === 0) return sendJson(res, 400, { error: 'no watermark image uploaded' })
+      // Normalize whatever they pick to a clean transparent PNG (also validates it's a real image).
+      const tmp = WM_FILE + '.in'
+      await writeFile(tmp, buf)
+      try { await runCmd('magick', [tmp, '-strip', WM_FILE]) } catch { await writeFile(WM_FILE, buf) }
+      await unlink(tmp).catch(() => {})
+      const q = url.searchParams
+      const mRaw = q.get('margin') // may be absent → keep the stored margin (Number(null) would wrongly be 0)
+      WM = {
+        name: String(q.get('name') || WM.name || 'watermark.png'),
+        pos: q.get('pos') || WM.pos || 'se',
+        size: Math.min(Math.max(Number(q.get('size')) || WM.size || 15, 1), 80),
+        margin: mRaw != null && mRaw !== '' ? Math.min(Math.max(Number(mRaw), 0), 25) : (WM.margin ?? 3),
+        enabled: true
+      }
+      await persistProjects()
+      const dataUrl = 'data:image/png;base64,' + (await readFile(WM_FILE)).toString('base64')
+      return sendJson(res, 200, { watermark: WM, dataUrl })
+    } catch (e) { return sendJson(res, 502, { error: 'could not set watermark: ' + (e.message || 'error') }) }
+  }
+  // Update watermark meta only (enable/disable, position, size, margin) — no new image.
+  if (url.pathname === '/api/watermark/settings' && req.method === 'POST') {
+    let body; try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    if (typeof body.pos === 'string') WM.pos = body.pos
+    if (body.size != null) WM.size = Math.min(Math.max(Number(body.size) || 15, 1), 80)
+    if (body.margin != null) WM.margin = Math.min(Math.max(Number(body.margin), 0), 25)
+    if (typeof body.enabled === 'boolean') WM.enabled = body.enabled && existsSync(WM_FILE)
+    await persistProjects()
+    return sendJson(res, 200, { watermark: WM })
   }
   if (url.pathname === '/api/project/new' && req.method === 'POST') {
     let body
@@ -905,45 +1035,88 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/api/video-webp' && req.method === 'POST') {
     const stamp = Date.now() + '-' + Math.random().toString(36).slice(2, 8)
     const inPath = join(tmpdir(), 'pp-vid-' + stamp), outPath = join(tmpdir(), 'pp-vid-' + stamp + '.webp')
+    const mp4Path = join(tmpdir(), 'pp-vid-' + stamp + '.mp4'), wmvPath = join(tmpdir(), 'pp-wmv-' + stamp + '.png')
     try {
       const buf = await readRawBody(req, 400 * 1024 * 1024) // up to 400 MB source clip
       if (buf.length === 0) return sendJson(res, 400, { error: 'no video uploaded' })
       await writeFile(inPath, buf)
+      // format 'webp' = on-chain cover (small, VFR-native). 'mp4' = promo/editor source — CONSTANT frame rate
+      // H.264 (Kdenlive & friends mishandle our variable per-frame timing), silent (mix audio in the editor).
+      const format = url.searchParams.get('format') === 'mp4' ? 'mp4' : 'webp'
       const aspect = url.searchParams.get('aspect') === '1:1' ? '1:1' : '16:9'
       const fpsReq = Number(url.searchParams.get('fps'))
-      const fps = [5, 7, 15].includes(fpsReq) ? fpsReq : 15
-      const width = Math.min(Math.max(Number(url.searchParams.get('width')) || 480, 96), 1024)
+      const fps = (format === 'mp4' ? [5, 7, 15, 24, 30] : [5, 7, 15]).includes(fpsReq) ? fpsReq : (format === 'mp4' ? 30 : 15)
+      const width = Math.min(Math.max(Number(url.searchParams.get('width')) || 480, 96), 1920) // up to 1080p for promo
       const qParam = url.searchParams.get('q'), lossless = qParam === 'lossless'
       const q = Math.min(Math.max(Number(qParam) || 55, 1), 100)
       const W = Math.round(width / 2) * 2
       const H = aspect === '1:1' ? W : Math.round((W * 9 / 16) / 2) * 2
+      // Optional cover watermark (the remembered brand PNG). ?wm=1 applies it; pos/size/margin override the
+      // stored defaults for this one export. Composited onto every frame after resize, timing preserved.
+      const wmOn = url.searchParams.get('wm') === '1' && existsSync(WM_FILE)
+      const wmMarginRaw = url.searchParams.get('wmMargin')
+      const wmOpts = {
+        pos: url.searchParams.get('wmPos') || WM.pos,
+        sizePct: Number(url.searchParams.get('wmSize')) || WM.size,
+        marginPct: wmMarginRaw != null && wmMarginRaw !== '' ? Number(wmMarginRaw) : WM.margin,
+        quality: q, lossless
+      }
+      const isWebp = buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP'
+
+      // ── MP4 (promo/editor source): constant frame rate, watermark burned in, no audio ──
+      if (format === 'mp4') {
+        if (isWebp) { // animated WebP → coalesce/resample to CFR (ffmpeg can't decode it directly)
+          const mp4 = await webpToMp4(inPath, { width: W, height: H, fps, quality: q, wmPath: wmOn ? WM_FILE : '', wmPos: wmOpts.pos, wmSize: wmOpts.sizePct, wmMargin: wmOpts.marginPct })
+          if (mp4 !== mp4Path) { await writeFile(mp4Path, await readFile(mp4)); await unlink(mp4).catch(() => {}) }
+        } else { // real video → native ffmpeg transcode + optional overlay watermark
+          const chain = [`fps=${fps}`, `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos`, `crop=${W}:${H}`].join(',')
+          const args = ['-y', '-i', inPath]
+          if (wmOn) {
+            const wmW = Math.max(8, Math.round(W * Math.min(Math.max(wmOpts.sizePct, 1), 80) / 100))
+            const mg = Math.round(W * Math.min(Math.max(wmOpts.marginPct, 0), 25) / 100)
+            await runCmd('magick', [WM_FILE, '-resize', wmW + 'x', wmvPath])
+            const ov = { se: `W-w-${mg}:H-h-${mg}`, sw: `${mg}:H-h-${mg}`, ne: `W-w-${mg}:${mg}`, nw: `${mg}:${mg}`, s: `(W-w)/2:H-h-${mg}`, center: `(W-w)/2:(H-h)/2` }[wmOpts.pos] || `W-w-${mg}:H-h-${mg}`
+            args.push('-i', wmvPath, '-filter_complex', `[0:v]${chain}[v];[v][1:v]overlay=${ov}`)
+          } else { args.push('-vf', chain) }
+          args.push('-r', String(fps), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', String(mp4Crf(q)), '-movflags', '+faststart', '-an', mp4Path)
+          await runFfmpeg(args)
+        }
+        const out = await readFile(mp4Path)
+        let duration = 0
+        try { duration = parseFloat((await runCmd('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', mp4Path], true)).trim()) || 0 } catch { /* leave 0 */ }
+        return sendJson(res, 200, { dataUrl: 'data:video/mp4;base64,' + out.toString('base64'), size: out.length, frames: Math.round(duration * fps), duration, width: W, height: H, fps, format: 'mp4', watermarked: wmOn })
+      }
+
+      // ── WebP (on-chain cover): keep native VFR timing ──
       // Animated WebP can't be read by ffmpeg — crop/resize it via ImageMagick instead, keeping its NATIVE
       // (variable) frame timing. Lets this tool turn an existing atom/loop into a 16:9 or 1:1 cover.
-      if (buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') {
-        const dataUrl = await reencodeWebp(inPath, { width: W, height: H, fps: 0, quality: q, lossless })
-        const raw = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64')
+      if (isWebp) {
+        const dataUrl0 = await reencodeWebp(inPath, { width: W, height: H, fps: 0, quality: q, lossless })
+        let raw = Buffer.from(dataUrl0.slice(dataUrl0.indexOf(',') + 1), 'base64')
+        await writeFile(outPath, raw)
+        if (wmOn) { const wmOut = await watermarkWebp(outPath, WM_FILE, wmOpts); raw = await readFile(wmOut); await writeFile(outPath, raw); await unlink(wmOut).catch(() => {}) }
         let frames = 0, duration = 0
         try {
-          await writeFile(outPath, raw)
           const delays = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).map(n => parseInt(n, 10) || 0)
           frames = delays.length; duration = delays.reduce((a, b) => a + b, 0) / 100
         } catch { /* leave 0 */ }
-        return sendJson(res, 200, { dataUrl, size: raw.length, frames, duration, width: W, height: H, fps: 0 })
+        return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + raw.toString('base64'), size: raw.length, frames, duration, width: W, height: H, fps: 0, format: 'webp', watermarked: wmOn })
       }
       // cover-crop: scale up to fill WxH (keeping the source aspect), then centre-crop to exactly WxH — robust
       // for any input shape (16:9 in → no crop; other shapes → trimmed to the chosen frame), then drop the fps.
       const vf = `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`
       const encArgs = lossless ? ['-lossless', '1', '-q:v', '100'] : ['-lossless', '0', '-q:v', String(q)]
       await runFfmpeg(['-y', '-i', inPath, '-vcodec', 'libwebp', '-vf', vf, '-loop', '0', ...encArgs, '-compression_level', '6', '-an', outPath])
+      if (wmOn) { const wmOut = await watermarkWebp(outPath, WM_FILE, wmOpts); const wb = await readFile(wmOut); await writeFile(outPath, wb); await unlink(wmOut).catch(() => {}) }
       const out = await readFile(outPath)
       let frames = 0
       try { frames = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).length } catch { /* leave 0 */ }
       const duration = frames ? frames / fps : 0
-      return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + out.toString('base64'), size: out.length, frames, duration, width: W, height: H, fps })
+      return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + out.toString('base64'), size: out.length, frames, duration, width: W, height: H, fps, format: 'webp', watermarked: wmOn })
     } catch (e) {
       return sendJson(res, 502, { error: 'video conversion failed: ' + (e.message || 'error') })
     } finally {
-      await unlink(inPath).catch(() => {}); await unlink(outPath).catch(() => {})
+      await unlink(inPath).catch(() => {}); await unlink(outPath).catch(() => {}); await unlink(mp4Path).catch(() => {}); await unlink(wmvPath).catch(() => {})
     }
   }
 

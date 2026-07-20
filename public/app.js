@@ -1514,34 +1514,76 @@ $('flacEncode').onclick = async () => {
 }
 
 /* ---- 🎥 Video → looping animated WebP: downsize a trimmed MP4/MOV for on-chain motion content ---- */
-let videoFile = null, videoResultData = ''
-$('btnVideo').onclick = () => { $('videoModal').hidden = false }
+let videoFile = null, videoResultData = '', videoResultFmt = 'webp'
+$('btnVideo').onclick = () => { $('videoModal').hidden = false; loadWatermark() }
 $('videoClose').onclick = () => { $('videoModal').hidden = true }
 $('videoModal').addEventListener('click', e => { if (e.target === $('videoModal')) $('videoModal').hidden = true })
 $('videoInput').onchange = () => { videoFile = $('videoInput').files[0] || null; $('videoName').textContent = videoFile ? videoFile.name : ''; $('videoStatus').textContent = ''; $('videoResult').hidden = true }
+
+/* ---- Cover watermark: pick a brand PNG once, reused consistently on every cover ---- */
+let wmSet = false // is a watermark image on file?
+function renderWm (wm, dataUrl) {
+  wmSet = !!(dataUrl)
+  $('videoWmOn').checked = !!(wm && wm.enabled) && wmSet
+  if (wm) { $('videoWmPos').value = wm.pos || 'se'; $('videoWmSize').value = String(wm.size || 15) }
+  if (dataUrl) { $('videoWmThumb').src = dataUrl; $('videoWmThumb').hidden = false } else { $('videoWmThumb').hidden = true }
+  $('videoWmName').textContent = wmSet ? (wm && wm.name ? wm.name : 'watermark') : 'none set'
+}
+async function loadWatermark () {
+  try { const r = await fetch('/api/watermark'); const d = await r.json(); renderWm(d.watermark, d.dataUrl) } catch { /* offline */ }
+}
+$('videoWmFile').onchange = async () => {
+  const f = $('videoWmFile').files[0]; if (!f) return
+  $('videoWmName').textContent = 'uploading…'
+  const qs = new URLSearchParams({ name: f.name, pos: $('videoWmPos').value, size: $('videoWmSize').value })
+  try {
+    const r = await fetch('/api/watermark?' + qs, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: f })
+    const d = await r.json(); if (!r.ok) { $('videoWmName').textContent = d.error || 'failed'; return }
+    renderWm(d.watermark, d.dataUrl)
+  } catch (e) { $('videoWmName').textContent = 'failed — ' + e.message }
+  $('videoWmFile').value = ''
+}
+async function saveWmSettings () {
+  if ($('videoWmOn').checked && !wmSet) { $('videoWmOn').checked = false; $('videoWmName').textContent = 'pick a brand PNG first'; return }
+  const body = { enabled: $('videoWmOn').checked, pos: $('videoWmPos').value, size: Number($('videoWmSize').value) }
+  try { await fetch('/api/watermark/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) } catch { /* offline */ }
+}
+$('videoWmOn').onchange = saveWmSettings
+$('videoWmPos').onchange = saveWmSettings
+$('videoWmSize').onchange = saveWmSettings
+
 $('videoBuild').onclick = async () => {
   if (!videoFile) { $('videoStatus').textContent = 'Choose a video first.'; return }
-  const qs = new URLSearchParams({ aspect: $('videoAspect').value, fps: $('videoFps').value, width: $('videoWidth').value, q: $('videoQ').value })
-  $('videoBuild').disabled = true; $('videoStatus').textContent = 'Converting… (downsizing + encoding the loop — large clips take a moment)'
+  const wmOn = $('videoWmOn').checked && wmSet
+  const fmt = $('videoFormat').value === 'mp4' ? 'mp4' : 'webp'
+  const qs = new URLSearchParams({ format: fmt, aspect: $('videoAspect').value, fps: $('videoFps').value, width: $('videoWidth').value, q: $('videoQ').value })
+  if (wmOn) { qs.set('wm', '1'); qs.set('wmPos', $('videoWmPos').value); qs.set('wmSize', $('videoWmSize').value) }
+  $('videoBuild').disabled = true; $('videoStatus').textContent = fmt === 'mp4' ? 'Rendering MP4… (constant frame rate + watermark — a moment)' : 'Converting… (downsizing + encoding the loop — large clips take a moment)'
   try {
     const r = await fetch('/api/video-webp?' + qs, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: videoFile })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('videoStatus').textContent = data.error || ('Error ' + r.status); return }
-    videoResultData = data.dataUrl
-    $('videoImg').src = videoResultData; $('videoResult').hidden = false
+    videoResultData = data.dataUrl; videoResultFmt = data.format || fmt
+    $('videoResult').hidden = false
+    if (videoResultFmt === 'mp4') { $('videoImg').hidden = true; $('videoVid').hidden = false; $('videoVid').src = videoResultData; $('videoVid').play?.().catch(() => {}) }
+    else { $('videoVid').hidden = true; $('videoVid').removeAttribute('src'); $('videoImg').hidden = false; $('videoImg').src = videoResultData }
     const kb = data.size / 1024, mb = data.size / 1048576
     const sizeStr = mb >= 1 ? mb.toFixed(2) + ' MB' : Math.round(kb) + ' KB'
-    $('videoInfo').textContent = `${data.width}×${data.height} · ${data.fps} fps · ${data.frames} frames · ${(data.duration || 0).toFixed(1)}s · ${sizeStr}`
-    $('videoStatus').textContent = mb > 3
-      ? `Made (${sizeStr}) — large for on-chain; try a lower frame rate, smaller width, or a shorter clip.`
-      : `Made (${sizeStr}) — on-chain-friendly. Download + mint in PharLap.`
+    $('videoInfo').textContent = `${data.width}×${data.height} · ${data.fps} fps · ${data.frames} frames · ${(data.duration || 0).toFixed(1)}s · ${sizeStr}${data.watermarked ? ' · 💧 watermarked' : ''}`
+    $('videoStatus').textContent = videoResultFmt === 'mp4'
+      ? `Made ${data.width}×${data.height} MP4 (${sizeStr}) — constant frame rate, ready for Kdenlive. Download + import.`
+      : (mb > 3
+        ? `Made (${sizeStr}) — large for on-chain; try a lower frame rate, smaller width, or a shorter clip.`
+        : `Made (${sizeStr}) — on-chain-friendly. Download + mint in PharLap.`)
   } catch (e) { $('videoStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('videoBuild').disabled = false }
 }
+$('videoFormat').onchange = () => { $('videoBuild').textContent = $('videoFormat').value === 'mp4' ? '🎥 Make MP4' : '🎥 Make WebP loop' }
 $('videoDownload').onclick = () => {
   if (!videoResultData) return
   const base = (videoFile ? videoFile.name.replace(/\.[^.]+$/, '') : 'clip').replace(/[^a-z0-9]+/gi, '-').toLowerCase()
-  const a = document.createElement('a'); a.href = videoResultData; a.download = base + '-loop.webp'; a.click()
+  const name = videoResultFmt === 'mp4' ? base + '-promo.mp4' : base + '-loop.webp'
+  const a = document.createElement('a'); a.href = videoResultData; a.download = name; a.click()
 }
 
 /* ---- 🏷️ Tag editor: embed cover art by role + lyrics + text tags into a FLAC (/api/tag → metaflac) ---- */
