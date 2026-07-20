@@ -1352,30 +1352,64 @@ $('tlClose').onclick = () => { $('tlModal').hidden = true }
 $('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('tlModal').hidden = true })
 $('tlAddFiles').onchange = () => { const fs = Array.from($('tlAddFiles').files || []); if (fs.length) addLibFiles(fs); $('tlAddFiles').value = '' }
 // ⛓ Import from mint: fetch an on-chain atom by txid → decrypt + verify → add as a clip with its txid set.
-async function importFromMint () {
-  const ref = ($('tlImportTx').value || '').trim()
+// Core import: resolve a ref (link/txid) → fetch + decrypt → add as a clip with its on-chain txid stamped.
+async function doImport (ref) {
   if (!ref) { $('tlImportStatus').textContent = 'Paste a share link (nft.sale/r/…) or a 64-character txid.'; return }
-  $('tlImportBtn').disabled = true; $('tlImportStatus').textContent = 'Resolving + fetching from chain, decrypting + verifying…'
+  $('tlImportBtn').disabled = true; $('tlMyAtomsBtn').disabled = true
+  $('tlImportStatus').textContent = 'Resolving + fetching from chain, decrypting + verifying…'
   try {
     const r = await fetch('/api/import-mint', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref }) })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) { $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
-    // Build a File from the recovered bytes and add it to the library, then stamp its on-chain txid.
     const blob = await (await fetch(d.dataUrl)).blob()
-    const name = d.fileName || ('atom-' + txid.slice(0, 8) + '.webp')
+    const name = d.fileName || ('atom-' + (d.txid || '').slice(0, 8) + '.webp')
     const file = new File([blob], name, { type: d.mimeType || blob.type })
     await addLibFiles([file])
     const entry = tlLib.get(name)
-    if (entry) { entry.tx = txid; renderLib(); refreshSceneSelects(); saveTimelineSoon() }
+    if (entry) { entry.tx = d.txid; renderLib(); refreshSceneSelects(); saveTimelineSoon() }
     const kb = Math.round(d.size / 1024)
     const badge = d.encrypted ? (d.verified ? '🔓 decrypted + verified against the on-chain commitment ✓' : '⚠ decrypted but hash mismatch') : (d.verified ? '✓ verified exact replica' : '⚠ hash mismatch')
     $('tlImportStatus').textContent = `Imported ${name} (${kb} KB) — ${badge}. Its txid is set; reference it in the timeline.`
     $('tlImportTx').value = ''
   } catch (e) { $('tlImportStatus').textContent = 'Import failed — is the server running? ' + e.message }
-  finally { $('tlImportBtn').disabled = false }
+  finally { $('tlImportBtn').disabled = false; $('tlMyAtomsBtn').disabled = false }
 }
-$('tlImportBtn').onclick = importFromMint
-$('tlImportTx').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); importFromMint() } })
+$('tlImportBtn').onclick = () => doImport(($('tlImportTx').value || '').trim())
+$('tlImportTx').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doImport(($('tlImportTx').value || '').trim()) } })
+
+// 👤 Creator identity + 🔍 My atoms: save the project's address/pubkey, then list this creator's on-chain atoms.
+async function loadCreatorId () { try { const p = await (await fetch('/api/project')).json(); if (p.current && p.current.creator) $('tlCreatorId').value = p.current.creator } catch { /* offline */ } }
+function renderMyAtoms (atoms) {
+  const ul = $('tlMyAtoms'); ul.textContent = ''
+  for (const a of atoms) {
+    const li = document.createElement('li'); li.style.cssText = 'font-size:12px; cursor:pointer; padding:3px 4px; border-radius:4px'
+    li.innerHTML = '⛓ <b>' + a.fileName.replace(/[<>&]/g, '') + '</b> <span class="dim">— click to reuse</span>'
+    li.title = a.txid
+    li.onmouseenter = () => { li.style.background = 'rgba(255,255,255,.06)' }
+    li.onmouseleave = () => { li.style.background = '' }
+    li.onclick = () => doImport(a.txid)
+    ul.append(li)
+  }
+}
+async function myAtoms () {
+  const identity = ($('tlCreatorId').value || '').trim()
+  $('tlMyAtomsBtn').disabled = true; $('tlImportStatus').textContent = 'Saving identity + scanning the chain for your atoms…'
+  try {
+    const s = await fetch('/api/project/creator', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identity }) })
+    const sd = await s.json().catch(() => ({}))
+    if (!s.ok) { $('tlImportStatus').textContent = sd.error || ('Error ' + s.status); return }
+    if (!identity) { $('tlMyAtoms').textContent = ''; $('tlImportStatus').textContent = 'Creator identity cleared.'; return }
+    const r = await fetch('/api/my-atoms'); const d = await r.json().catch(() => ({}))
+    if (!r.ok) { $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
+    renderMyAtoms(d.atoms || [])
+    $('tlImportStatus').textContent = (d.atoms || []).length
+      ? `Found ${d.atoms.length} atom${d.atoms.length === 1 ? '' : 's'} at ${d.address}. Click one to reuse it.`
+      : `No content atoms found at ${d.address} yet.`
+  } catch (e) { $('tlImportStatus').textContent = 'Lookup failed — is the server running? ' + e.message }
+  finally { $('tlMyAtomsBtn').disabled = false }
+}
+$('tlMyAtomsBtn').onclick = myAtoms
+loadCreatorId()
 $('tlAdd').onclick = () => addTlRow()
 $('tlDownload').onclick = downloadCue
 $('tlBmf').onclick = downloadBmf

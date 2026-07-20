@@ -4,7 +4,7 @@
 //
 // The .ts decoders are vendored copies of PharLap/src/{tokenCodec,contentCrypto,compress,pushDrop}.ts —
 // keep them in sync when PharLap's on-chain format changes.
-import { Transaction, Utils, Hash } from '@bsv/sdk'
+import { Transaction, Utils, Hash, PublicKey } from '@bsv/sdk'
 import { parseFileScript, parseTemplateScript, decodeTokenRules } from './tokenCodec.ts'
 import { unwrapContentKey, decryptContent } from './contentCrypto.ts'
 import { decompress } from './compress.ts'
@@ -42,4 +42,41 @@ export async function importCollection (txid, { fetchHex = fetchRawTxHex } = {})
   if (rules?.isCompressed) bytes = await decompress(bytes)
   const verified = encrypted ? ciphertextOk : (template?.fileHash === Utils.toHex(Hash.sha256(bytes)))
   return { fileName: file.fileName, mimeType: file.mimeType, bytes, encrypted, verified, sha256: Utils.toHex(Hash.sha256(bytes)), rules }
+}
+
+// Normalize a creator identity — a compressed pubkey (66-hex, 02/03) OR a base58 P2PKH address (what a wallet
+// shows) — to { address, pubKeyHex|null }. Address alone suffices for discovery; pubkey also enables exact
+// owner matching. Returns null if it's neither.
+export function creatorIdentity (identity) {
+  const id = String(identity || '').trim()
+  if (/^0[23][0-9a-f]{64}$/i.test(id)) { const pk = PublicKey.fromString(id); return { address: pk.toAddress(), pubKeyHex: id.toLowerCase() } }
+  if (/^[13][1-9A-HJ-NP-Za-km-z]{25,34}$/.test(id)) return { address: id, pubKeyHex: null }
+  return null
+}
+
+async function fetchAddressHistory (address) {
+  const r = await fetch(`https://api.whatsonchain.com/v1/bsv/main/address/${address}/history`)
+  if (!r.ok) throw new Error(`address history lookup failed (${r.status})`)
+  const j = await r.json()
+  return (Array.isArray(j) ? j : (j.result || [])).map(h => h.tx_hash).filter(Boolean)
+}
+
+// Discover a creator's content atoms (collections) from their address/pubkey. Light metadata only — parses the
+// on-chain file header (name + mime) WITHOUT decrypting the payload, so the content is fetched lazily when used.
+// `known` (a Set of already-seen txids) lets a caller skip re-scanning; returns { address, atoms:[{txid,fileName,mimeType}] }.
+export async function listCreatorAtoms (identity, { fetchHistory = fetchAddressHistory, fetchHex = fetchRawTxHex, known } = {}) {
+  const who = creatorIdentity(identity)
+  if (!who) throw new Error('enter a wallet address or a compressed public key')
+  const txids = [...new Set(await fetchHistory(who.address))]
+  const atoms = []
+  for (const txid of txids) {
+    if (known && known.has(txid)) continue
+    try {
+      const tx = Transaction.fromHex(await fetchHex(txid))
+      let file = null
+      for (const o of tx.outputs) { const f = parseFileScript(o.lockingScript); if (f) { file = f.fields; break } }
+      if (file) atoms.push({ txid, fileName: file.fileName, mimeType: file.mimeType }) // a collection carries content; editions/payments don't
+    } catch { /* skip anything that isn't a parseable content collection */ }
+  }
+  return { address: who.address, atoms }
 }

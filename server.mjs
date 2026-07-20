@@ -10,7 +10,7 @@ import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildEpub } from './epub.mjs'
-import { importCollection } from './vendor/pharlap/bmf-import.bundle.mjs' // fetch + decrypt an on-chain media atom (esbuild bundle — Electron-safe, run `npm run build:vendor` after editing the vendored decoders)
+import { importCollection, listCreatorAtoms, creatorIdentity } from './vendor/pharlap/bmf-import.bundle.mjs' // fetch/decrypt an on-chain atom + discover a creator's atoms (esbuild bundle — Electron-safe, run `npm run build:vendor` after editing the vendored decoders)
 import { spawn } from 'node:child_process'
 import { tmpdir, homedir } from 'node:os'
 import { unlink, readdir, rm } from 'node:fs/promises'
@@ -53,7 +53,7 @@ function loadProjectsState () {
     if (!existsSync(PROJECTS_FILE)) return
     const s = JSON.parse(readFileSync(PROJECTS_FILE, 'utf8'))
     RECENT = Array.isArray(s.recent) ? s.recent.filter(p => p && p.name && p.mastersDir) : []
-    if (s.current) { const c = RECENT.find(p => p.name === s.current); if (c) CURRENT = { name: c.name, mastersDir: c.mastersDir, renderDir: c.renderDir || '' } }
+    if (s.current) { const c = RECENT.find(p => p.name === s.current); if (c) CURRENT = { name: c.name, mastersDir: c.mastersDir, renderDir: c.renderDir || '', creator: c.creator || '' } }
     if (typeof s.lastRenderDir === 'string') LAST_RENDER_DIR = s.lastRenderDir
     if (s.watermark && typeof s.watermark === 'object') {
       WM = { name: String(s.watermark.name || ''), pos: s.watermark.pos || 'se', size: Number(s.watermark.size) || 15, margin: Number(s.watermark.margin) || 3, enabled: !!s.watermark.enabled }
@@ -803,6 +803,28 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // ── Creator identity (wallet address OR compressed pubkey) — set once per project, used to discover atoms ──
+  if (url.pathname === '/api/project/creator' && req.method === 'POST') {
+    let body; try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    if (!CURRENT) return sendJson(res, 400, { error: 'Open or create a project first.' })
+    const identity = String(body.identity || '').trim()
+    const who = identity ? creatorIdentity(identity) : null
+    if (identity && !who) return sendJson(res, 400, { error: 'Enter a wallet address (starts with 1…) or a compressed public key (66 hex).' })
+    CURRENT.creator = identity
+    const e = RECENT.find(p => p.name === CURRENT.name); if (e) e.creator = identity
+    await persistProjects()
+    return sendJson(res, 200, { creator: identity, address: who ? who.address : null })
+  }
+  // ── Discover the current creator's on-chain atoms (light metadata; content fetched lazily on use) ──
+  if (url.pathname === '/api/my-atoms' && req.method === 'GET') {
+    const identity = CURRENT?.creator
+    if (!identity) return sendJson(res, 400, { error: 'Set your wallet address or public key for this project first.' })
+    try {
+      const r = await listCreatorAtoms(identity)
+      return sendJson(res, 200, r)
+    } catch (e) { return sendJson(res, 502, { error: 'atom lookup failed: ' + (e.message || 'error') }) }
+  }
+
   // ── Cover watermark: pick a brand PNG once, reuse it consistently on every cover ──
   if (url.pathname === '/api/watermark' && req.method === 'GET') {
     let dataUrl = null
@@ -861,7 +883,7 @@ const server = createServer(async (req, res) => {
     const p = RECENT.find(x => x.name === String(body.name || '').trim())
     if (!p) return sendJson(res, 404, { error: 'Project not found.' })
     try { await mkdir(p.mastersDir, { recursive: true }) } catch { /* keep going — folder may be on a detached drive */ }
-    CURRENT = { name: p.name, mastersDir: p.mastersDir, renderDir: p.renderDir || '' }
+    CURRENT = { name: p.name, mastersDir: p.mastersDir, renderDir: p.renderDir || '', creator: p.creator || '' }
     RECENT = [{ ...p, opened: Date.now() }, ...RECENT.filter(x => x.name !== p.name)]
     await persistProjects()
     return sendJson(res, 200, { current: CURRENT, recent: RECENT })
