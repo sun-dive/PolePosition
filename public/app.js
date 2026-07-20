@@ -1351,6 +1351,31 @@ $('tlRFmt').onchange = () => { const w = $('tlRFmt').value === 'webp'; $('tlRQ')
 $('tlClose').onclick = () => { $('tlModal').hidden = true }
 $('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('tlModal').hidden = true })
 $('tlAddFiles').onchange = () => { const fs = Array.from($('tlAddFiles').files || []); if (fs.length) addLibFiles(fs); $('tlAddFiles').value = '' }
+// ⛓ Import from mint: fetch an on-chain atom by txid → decrypt + verify → add as a clip with its txid set.
+async function importFromMint () {
+  const txid = ($('tlImportTx').value || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(txid)) { $('tlImportStatus').textContent = 'Enter a 64-character (hex) transaction id.'; return }
+  $('tlImportBtn').disabled = true; $('tlImportStatus').textContent = 'Fetching from chain, decrypting + verifying…'
+  try {
+    const r = await fetch('/api/import-mint', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ txid }) })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) { $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
+    // Build a File from the recovered bytes and add it to the library, then stamp its on-chain txid.
+    const blob = await (await fetch(d.dataUrl)).blob()
+    const name = d.fileName || ('atom-' + txid.slice(0, 8) + '.webp')
+    const file = new File([blob], name, { type: d.mimeType || blob.type })
+    await addLibFiles([file])
+    const entry = tlLib.get(name)
+    if (entry) { entry.tx = txid; renderLib(); refreshSceneSelects(); saveTimelineSoon() }
+    const kb = Math.round(d.size / 1024)
+    const badge = d.encrypted ? (d.verified ? '🔓 decrypted + verified against the on-chain commitment ✓' : '⚠ decrypted but hash mismatch') : (d.verified ? '✓ verified exact replica' : '⚠ hash mismatch')
+    $('tlImportStatus').textContent = `Imported ${name} (${kb} KB) — ${badge}. Its txid is set; reference it in the timeline.`
+    $('tlImportTx').value = ''
+  } catch (e) { $('tlImportStatus').textContent = 'Import failed — is the server running? ' + e.message }
+  finally { $('tlImportBtn').disabled = false }
+}
+$('tlImportBtn').onclick = importFromMint
+$('tlImportTx').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); importFromMint() } })
 $('tlAdd').onclick = () => addTlRow()
 $('tlDownload').onclick = downloadCue
 $('tlBmf').onclick = downloadBmf

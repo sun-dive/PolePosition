@@ -9,6 +9,8 @@ dist-app/
 # generated rich-editor bundle (rebuilt by `npm run build:editor`)
 public/editor.bundle.js
 public/editor.bundle.css
+# generated on-chain-decoder bundle (rebuilt by `npm run build:vendor`)
+vendor/pharlap/bmf-import.bundle.mjs
 
 # generated / downloaded image art (kept local, not committed)
 *-cover.png

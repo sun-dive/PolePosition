@@ -219,6 +219,11 @@
           <div class="tl-sec">① Scene clips <span class="dim" style="font-weight:400">— each stored once on-chain</span></div>
           <ul id="tlLib" class="tl-lib"></ul>
           <label class="ghost" style="cursor:pointer; display:inline-block">+ Add scene clip(s)<input id="tlAddFiles" type="file" accept="image/*" multiple hidden></label>
+          <div class="row" style="gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px">
+            <input id="tlImportTx" type="text" placeholder="⛓ import atom by on-chain txid" spellcheck="false" style="flex:1 1 220px; min-width:180px; font-size:12px; font-family:monospace" />
+            <button id="tlImportBtn" class="ghost" type="button" title="Fetch an on-chain media atom by its collection txid, decrypt + verify it, and add it as a reusable clip (its txid is set automatically)">⛓ Import from mint</button>
+          </div>
+          <div id="tlImportStatus" class="dim" style="font-size:12px; margin-top:4px"></div>
         </div>
         <div class="tl-col">
           <div class="tl-sec">② Timeline <span class="dim" style="font-weight:400">— place clips in time, reuse freely</span></div>

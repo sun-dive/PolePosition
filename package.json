@@ -5,7 +5,8 @@
   "main": "electron/main.mjs",
   "scripts": {
     "build:editor": "node build-editor.mjs",
-    "postinstall": "node build-editor.mjs",
+    "build:vendor": "node build-vendor.mjs",
+    "postinstall": "node build-editor.mjs && node build-vendor.mjs",
     "start": "node server.mjs",
     "electron": "electron .",
     "dist": "electron-builder",
@@ -44,6 +45,7 @@
     "@milkdown/crepe": "^7.5.0"
   },
   "devDependencies": {
+    "@bsv/sdk": "^2.1.7",
     "electron": "^43.0.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.23.0"

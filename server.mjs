@@ -10,6 +10,7 @@ import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildEpub } from './epub.mjs'
+import { importCollection } from './vendor/pharlap/bmf-import.bundle.mjs' // fetch + decrypt an on-chain media atom (esbuild bundle — Electron-safe, run `npm run build:vendor` after editing the vendored decoders)
 import { spawn } from 'node:child_process'
 import { tmpdir, homedir } from 'node:os'
 import { unlink, readdir, rm } from 'node:fs/promises'
@@ -753,6 +754,33 @@ const server = createServer(async (req, res) => {
   // ── Projects: current + recent, new, open ──
   if (url.pathname === '/api/project' && req.method === 'GET') {
     return sendJson(res, 200, { current: CURRENT, recent: RECENT, home: homedir(), lastRenderDir: LAST_RENDER_DIR, watermark: WM })
+  }
+
+  // ── Import a media atom from an on-chain mint: fetch → decrypt (Tier-1, keyless) → verify → archive ──
+  // Body: { txid }.  Returns the decoded content + provenance so the UI can add it as an on-chain-referenced clip.
+  if (url.pathname === '/api/import-mint' && req.method === 'POST') {
+    let body; try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
+    const txid = String(body.txid || '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(txid)) return sendJson(res, 400, { error: 'Enter a 64-character (hex) transaction id.' })
+    try {
+      const r = await importCollection(txid)
+      if (!r) return sendJson(res, 404, { error: 'No media found in that transaction — is it a PharLap content mint?' })
+      const buf = Buffer.from(r.bytes)
+      // Archive the recovered atom into the project's masters folder (so reused atoms are kept locally too).
+      let savedPath = null
+      if (CURRENT?.mastersDir) {
+        try {
+          await mkdir(CURRENT.mastersDir, { recursive: true })
+          const safe = (r.fileName || 'atom.webp').replace(/[^a-z0-9._-]/gi, '_')
+          savedPath = join(CURRENT.mastersDir, 'imported-' + txid.slice(0, 12) + '-' + safe)
+          await writeFile(savedPath, buf)
+        } catch (e) { console.warn('  ⚠️  could not archive imported atom:', e.message) }
+      }
+      const mime = r.mimeType || 'application/octet-stream'
+      return sendJson(res, 200, { txid, fileName: r.fileName, mimeType: mime, size: buf.length, encrypted: r.encrypted, verified: r.verified, sha256: r.sha256, savedPath, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') })
+    } catch (e) {
+      return sendJson(res, 502, { error: 'import failed: ' + (e.message || 'error') })
+    }
   }
 
   // ── Cover watermark: pick a brand PNG once, reuse it consistently on every cover ──
