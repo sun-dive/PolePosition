@@ -240,17 +240,23 @@ async function falImage ({ prompt, model, aspectRatio, width, height, imageUrls,
 }
 
 // "Animate cover": send a still image to a fal IMAGE-TO-VIDEO model → get a short MP4 back (downloaded here).
-async function falImageToVideo ({ image, prompt }) {
+// Selectable image-to-video models for "Animate". Default = FAL_VIDEO_MODEL (.env, Kling). Veo is the
+// go-to when Kling over-dramatizes motion (better prompt-following); it gets generate_audio:false since
+// these are silent visual loops. Client sends a key ('kling'|'veo'); anything else falls back to Kling.
+const VIDEO_MODELS = { kling: FAL_VIDEO_MODEL, veo: 'fal-ai/veo3.1/fast/image-to-video' }
+async function falImageToVideo ({ image, prompt, model }) {
   const key = process.env.FAL_API_KEY
   if (!key) throw new Error('FAL_API_KEY isn’t set — add it to your local .env to animate.')
+  const endpoint = model || FAL_VIDEO_MODEL
+  const input = { image_url: image, prompt, ...(endpoint.includes('veo') ? { generate_audio: false } : {}) }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 300000) // video generation can take a minute or two
   let res
   try {
-    res = await fetch('https://fal.run/' + FAL_VIDEO_MODEL, {
+    res = await fetch('https://fal.run/' + endpoint, {
       method: 'POST',
       headers: { authorization: 'Key ' + key, 'content-type': 'application/json' },
-      body: JSON.stringify({ image_url: image, prompt }),
+      body: JSON.stringify(input),
       signal: ctrl.signal
     })
   } catch (e) {
@@ -745,7 +751,8 @@ const server = createServer(async (req, res) => {
       ? body.prompt.trim()
       : 'Subtle, gentle ambient motion — slow drift, faint flicker — a calm, seamless loop. Keep the composition stable.'
     try {
-      const { buffer: mp4, master } = await falImageToVideo({ image: body.image, prompt })
+      const videoModel = VIDEO_MODELS[body.videoModel] || FAL_VIDEO_MODEL // allowlist: 'kling' | 'veo'
+      const { buffer: mp4, master } = await falImageToVideo({ image: body.image, prompt, model: videoModel })
       const out = await mp4ToAnimatedImage(mp4)
       return sendJson(res, 200, { ...out, master })
     } catch (e) {

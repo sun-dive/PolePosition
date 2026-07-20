@@ -1965,7 +1965,7 @@ async function animateArt () {
   const prompt = $('artAnimPrompt').value.trim()
   $('artAnimate').disabled = true; $('artAnimStatus').textContent = 'Animating… (image→video can take a minute or two)'
   try {
-    const r = await fetch('/api/animate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: artData, prompt }) })
+    const r = await fetch('/api/animate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: artData, prompt, videoModel: $('artVideoModel')?.value || 'kling' }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artAnimStatus').textContent = data.error || ('Error ' + r.status); return }
     artAnimData = data.dataUrl; $('artAnimImg').src = artAnimData; $('artAnimResult').hidden = false

@@ -543,7 +543,14 @@
           <button id="artAnimSuggest" class="ai-btn" type="button" title="Claude suggests subtle motion tailored to this image">✨ Suggest motion</button>
           <span id="artAnimSuggestStatus" class="dim"></span>
         </div>
-        <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="artAnimate" class="ai-btn" type="button">🎬 Animate</button><span id="artAnimStatus" class="dim"></span></div>
+        <div class="row" style="margin-top:6px; gap:8px; align-items:center">
+          <button id="artAnimate" class="ai-btn" type="button">🎬 Animate</button>
+          <select id="artVideoModel" class="project-select" title="Image→video model. Kling is the default; try Veo when Kling over-dramatizes the motion.">
+            <option value="kling" selected>Kling 2.5 Turbo Pro ($0.35/5s)</option>
+            <option value="veo">Veo 3.1 Fast ($0.50/5s — better motion control)</option>
+          </select>
+          <span id="artAnimStatus" class="dim"></span>
+        </div>
         <div id="artAnimResult" hidden style="margin-top:8px">
           <img id="artAnimImg" alt="animated preview" style="max-width:100%; border-radius:6px" />
           <div class="cover-actions" style="margin-top:6px"><button id="artAnimDownload" class="ghost" type="button">Download animation</button></div>
