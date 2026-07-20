@@ -917,6 +917,19 @@ const server = createServer(async (req, res) => {
       const q = Math.min(Math.max(Number(qParam) || 55, 1), 100)
       const W = Math.round(width / 2) * 2
       const H = aspect === '1:1' ? W : Math.round((W * 9 / 16) / 2) * 2
+      // Animated WebP can't be read by ffmpeg — crop/resize it via ImageMagick instead, keeping its NATIVE
+      // (variable) frame timing. Lets this tool turn an existing atom/loop into a 16:9 or 1:1 cover.
+      if (buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') {
+        const dataUrl = await reencodeWebp(inPath, { width: W, height: H, fps: 0, quality: q, lossless })
+        const raw = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64')
+        let frames = 0, duration = 0
+        try {
+          await writeFile(outPath, raw)
+          const delays = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).map(n => parseInt(n, 10) || 0)
+          frames = delays.length; duration = delays.reduce((a, b) => a + b, 0) / 100
+        } catch { /* leave 0 */ }
+        return sendJson(res, 200, { dataUrl, size: raw.length, frames, duration, width: W, height: H, fps: 0 })
+      }
       // cover-crop: scale up to fill WxH (keeping the source aspect), then centre-crop to exactly WxH — robust
       // for any input shape (16:9 in → no crop; other shapes → trimmed to the chosen frame), then drop the fps.
       const vf = `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`

@@ -733,6 +733,8 @@ function fillResSelect (sel, maxW, maxH) {
   for (const pw of [1920, 1280, 854, 640, 512, 384, 256]) if (!maxW || pw < maxW) opt(g1, 'w' + pw, `${pw} wide → ${pw}×${Math.round(pw * ar / 2) * 2}`)
   const g2 = grp('16:9 crop-to-fit')
   for (const [w, h] of [[1920, 1080], [1280, 720], [854, 480], [640, 360], [512, 288], [426, 240]]) if (!maxW || w <= maxW) opt(g2, `${w}x${h}`, `${w}×${h}`)
+  const g3 = grp('1:1 square crop-to-fit (covers)')
+  for (const s of [512, 400, 256]) if (!maxW || s <= maxW) opt(g3, `${s}x${s}`, `${s}×${s}`)
   if ([...sel.options].some(o => o.value === keep)) sel.value = keep
 }
 // Decode a resolution <select> value → { width, height }. width+height = crop-to-fit; width only = keep aspect.

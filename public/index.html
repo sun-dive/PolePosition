@@ -24,7 +24,7 @@
       <button id="btnTimeline" class="ghost" type="button" title="Build a scene-timeline music video cue synced to a song">🎞️ Music video</button>
       <button id="btnLyrics" class="ghost" type="button" title="Build a synced lyric (.lrc) timeline by tapping along to the song">🎤 Lyrics</button>
       <button id="btnFlac" class="ghost" type="button" title="Encode a WAV to lossless FLAC (max compression) for minting">🎚️ WAV→FLAC</button>
-      <button id="btnVideo" class="ghost" type="button" title="Downsize a trimmed video (MP4/MOV) to a small looping animated WebP (16:9 or square, low fps) for on-chain content">🎥 Video→WebP</button>
+      <button id="btnVideo" class="ghost" type="button" title="Downsize a video (MP4/MOV) OR an existing animated WebP to a small looping WebP (16:9 or 1:1) — e.g. a square cover card for a resalable asset">🎥 Video→WebP</button>
 <button id="btnTag" class="ghost" type="button" title="Embed cover art, lyrics and tags into a FLAC or MP3 (in-app — no Kid3)">🏷️ Audio Tags</button>
       <button id="btnArt" class="ghost" type="button" title="Create art — book covers, chapter images, or 800×800 NFT art">🎨 Art</button>
       <button id="btnBookCover" class="ghost" type="button" title="Design a flat book cover (front or back) with perfect text + optional image, to feed into the 3D render">📖 Book Cover</button>
@@ -314,9 +314,9 @@
   <div id="videoModal" class="modal" hidden>
     <div class="modal-box" style="max-width:540px">
       <div class="modal-head"><b>🎥 Video → looping WebP</b><button id="videoClose" class="ghost" type="button">✕</button></div>
-      <p class="dim" style="font-size:12px; margin:0 0 10px">Trim your clip in a video editor (e.g. Kdenlive) and export an MP4, then downsize it here to a small looping animated WebP for minting. <b>Keep it short</b> — length drives the on-chain size the most.</p>
+      <p class="dim" style="font-size:12px; margin:0 0 10px">Downsize a clip (MP4/MOV/WebM) <b>or an existing animated WebP</b> to a small looping WebP — pick <b>16:9</b> or <b>1:1</b>. Great for turning a full-res atom into a square animated <b>cover card</b> (a WebP input keeps its native timing; fps applies to video only). <b>Keep it short</b> — length drives on-chain size most.</p>
       <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px">
-        <label class="ghost" style="cursor:pointer">🎬 Choose video<input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mp4,.mov,.webm,.mkv" hidden></label>
+        <label class="ghost" style="cursor:pointer">🎬 Choose video or WebP<input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,image/webp,.mp4,.mov,.webm,.mkv,.webp" hidden></label>
         <span id="videoName" class="dim" style="font-size:12px"></span>
       </div>
       <div class="row" style="gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; font-size:12px">
