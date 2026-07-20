@@ -1024,10 +1024,10 @@ function downloadCue () {
 // Export a BMF manifest (JSON, on-chain form): scenes + audio referenced by txid where set, so a player
 // (Phar Lap) fetches each component from chain instead of bundling it. Clips without a txid fall back to
 // a name-only reference (resolvable from a .bmc bundle, not fully on-chain).
-function downloadBmf () {
-  const placements = tlPlacements()
-  if (!placements.length) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
-  const scenes = placements.map(p => {
+// Build the BMF manifest for the current timeline — reused atoms referenced by their on-chain txid, new
+// clips by name. Shared by the .bmf export and the reuse-aware bundle so they never drift.
+function bmfManifest () {
+  const scenes = tlPlacements().map(p => {
     const e = tlLib.get(p.name)
     const s = { t: Math.round(p.t * 100) / 100 }
     if (e && /^[0-9a-f]{64}$/i.test(e.tx || '')) s.tx = e.tx.toLowerCase()
@@ -1041,6 +1041,11 @@ function downloadBmf () {
   if (tlAudioFile) { manifest.audio = {}; if (/^[0-9a-f]{64}$/i.test(tlAudioTx)) manifest.audio.tx = tlAudioTx.toLowerCase(); manifest.audio.name = tlAudioFile.name }
   manifest.scenes = scenes
   const base = ((tlAudioFile && tlAudioFile.name.replace(/\.[^.]+$/, '')) || book.title || 'music-video').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'music-video'
+  return { manifest, scenes, base }
+}
+function downloadBmf () {
+  if (!tlPlacements().length) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
+  const { manifest, scenes, base } = bmfManifest()
   triggerDownload(new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/x.bmf' }), base + '.bmf')
   const missing = scenes.filter(s => !s.tx).length + ((tlAudioFile && !manifest.audio.tx) ? 1 : 0)
   $('tlStatus').textContent = missing === 0
@@ -1061,25 +1066,33 @@ async function toWebpForExport (name, file, quality = 0.9) {
   } catch { return { name, bytes: new Uint8Array(await file.arrayBuffer()) } } // fall back to the original bytes
 }
 async function downloadBundle () {
-  const text = cueText()
-  if (!text) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
+  if (!cueText()) { $('tlStatus').textContent = 'Add at least one timeline placement.'; return }
   const webp = !$('tlWebp') || $('tlWebp').checked
   $('tlStatus').textContent = webp ? 'Packing bundle (stills→WebP)…' : 'Packing bundle…'
   const entries = [], rename = new Map()
-  let before = 0, after = 0
+  let before = 0, after = 0, onchain = 0
   for (const [name, e] of tlLib) {
+    // Reuse-aware: a clip already on-chain (has a txid) is REFERENCED via the .bmf, not repacked — so
+    // reusing it never re-mints a duplicate collection. Only new (local) clips go into the bundle to mint.
+    if (/^[0-9a-f]{64}$/i.test(e.tx || '')) { onchain++; continue }
     const out = webp ? await toWebpForExport(name, e.file) : { name, bytes: new Uint8Array(await e.file.arrayBuffer()) }
     rename.set(name, out.name); entries.push(out)
     before += e.file.size; after += out.bytes.length
   }
-  if (tlAudioFile) entries.push({ name: tlAudioFile.name, bytes: new Uint8Array(await tlAudioFile.arrayBuffer()) })
-  // Rebuild the cue with the (possibly renamed) filenames so its lines still match the packed clips.
-  const cue = tlPlacements().map(s => '[' + fmtLrc(s.t) + ']' + (rename.get(s.name) || s.name)).join('\n') + '\n'
+  const audioOnChain = !!(tlAudioFile && /^[0-9a-f]{64}$/i.test(tlAudioTx))
+  if (tlAudioFile && !audioOnChain) entries.push({ name: tlAudioFile.name, bytes: new Uint8Array(await tlAudioFile.arrayBuffer()) })
+  // video.cue lists only the LOCALLY-bundled placements (their files are in the zip); reused on-chain atoms
+  // live in the .bmf (referenced by txid). Rename maps stills → their exported .webp names.
+  const cue = tlPlacements().filter(s => rename.has(s.name)).map(s => '[' + fmtLrc(s.t) + ']' + rename.get(s.name)).join('\n') + '\n'
   entries.push({ name: 'video.cue', bytes: new TextEncoder().encode(cue) })
+  // The .bmf is the COMPLETE manifest (on-chain atoms by txid + new clips by name) so nothing is re-minted.
+  const { manifest, base } = bmfManifest()
+  entries.push({ name: base + '.bmf', bytes: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) })
   triggerDownload(makeZip(entries), 'music-video-bundle.zip')
   const saved = before - after
   const savedMsg = webp && saved > 0 ? ` · WebP saved ${(saved / 1048576).toFixed(1)}MB` : ''
-  $('tlStatus').textContent = 'Bundle ready (' + tlLib.size + ' clips' + (tlAudioFile ? ' + song' : '') + ' + cue' + savedMsg + '). Unzip, then mint all together in PharLap.'
+  const refMsg = onchain ? ` · ${onchain} atom${onchain === 1 ? '' : 's'} referenced on-chain (not re-minted)` : ''
+  $('tlStatus').textContent = `Bundle ready (${rename.size} new clip${rename.size === 1 ? '' : 's'}${tlAudioFile ? (audioOnChain ? ' · song on-chain' : ' + song') : ''} + .bmf${refMsg}${savedMsg}). Unzip, then mint the new parts in PharLap — reused atoms resolve from chain.`
 }
 
 /* --- minimal store-only ZIP (WebP/audio are already compressed, so no deflate needed) --- */
