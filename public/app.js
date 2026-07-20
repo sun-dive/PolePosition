@@ -1353,11 +1353,11 @@ $('tlModal').addEventListener('click', e => { if (e.target === $('tlModal')) $('
 $('tlAddFiles').onchange = () => { const fs = Array.from($('tlAddFiles').files || []); if (fs.length) addLibFiles(fs); $('tlAddFiles').value = '' }
 // ⛓ Import from mint: fetch an on-chain atom by txid → decrypt + verify → add as a clip with its txid set.
 async function importFromMint () {
-  const txid = ($('tlImportTx').value || '').trim().toLowerCase()
-  if (!/^[0-9a-f]{64}$/.test(txid)) { $('tlImportStatus').textContent = 'Enter a 64-character (hex) transaction id.'; return }
-  $('tlImportBtn').disabled = true; $('tlImportStatus').textContent = 'Fetching from chain, decrypting + verifying…'
+  const ref = ($('tlImportTx').value || '').trim()
+  if (!ref) { $('tlImportStatus').textContent = 'Paste a share link (nft.sale/r/…) or a 64-character txid.'; return }
+  $('tlImportBtn').disabled = true; $('tlImportStatus').textContent = 'Resolving + fetching from chain, decrypting + verifying…'
   try {
-    const r = await fetch('/api/import-mint', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ txid }) })
+    const r = await fetch('/api/import-mint', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref }) })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) { $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
     // Build a File from the recovered bytes and add it to the library, then stamp its on-chain txid.

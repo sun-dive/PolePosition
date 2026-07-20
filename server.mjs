@@ -84,6 +84,25 @@ async function saveMaster (kind, buf, ext, hint) {
     return p
   } catch (e) { console.warn('  ⚠️  could not save master:', e.message); return null }
 }
+// Resolve a user-pasted reference — a raw collection txid, a smartnfts/cover URL that embeds it, or a bare
+// nft.sale share link (/r/<slug> or /?n=<slug>) — down to the 64-hex collection txid. Share pages embed the
+// txid as covers/<txid>.webp (og:image) or #c=<txid>, so a slug-only link is fetched and read off the page.
+async function resolveImportRef (ref) {
+  ref = String(ref || '').trim()
+  if (!ref) return null
+  let m = ref.match(/[0-9a-f]{64}/i) // bare txid, or a txid inside a smartnfts/cover URL the user pasted
+  if (m) return m[0].toLowerCase()
+  let url = ref
+  if (!/^https?:\/\//i.test(url)) {
+    if (/(^\/?r\/)|(\?n=)/i.test(url)) url = 'https://nft.sale/' + url.replace(/^\/+/, '')
+    else return null
+  }
+  try {
+    const html = await (await fetch(url, { redirect: 'follow' })).text()
+    m = html.match(/covers\/([0-9a-f]{64})\.webp/i) || html.match(/[#&?]c=([0-9a-f]{64})/i)
+    return m ? m[1].toLowerCase() : null
+  } catch { return null }
+}
 loadProjectsState()
 
 // HARD GUARD: never let an Anthropic API key reach the SDK — it would override the subscription and bill
@@ -760,8 +779,9 @@ const server = createServer(async (req, res) => {
   // Body: { txid }.  Returns the decoded content + provenance so the UI can add it as an on-chain-referenced clip.
   if (url.pathname === '/api/import-mint' && req.method === 'POST') {
     let body; try { body = await readJson(req) } catch { return sendJson(res, 400, { error: 'bad request body' }) }
-    const txid = String(body.txid || '').trim().toLowerCase()
-    if (!/^[0-9a-f]{64}$/.test(txid)) return sendJson(res, 400, { error: 'Enter a 64-character (hex) transaction id.' })
+    let txid
+    try { txid = await resolveImportRef(body.ref || body.txid) } catch (e) { return sendJson(res, 502, { error: 'could not resolve that link: ' + (e.message || 'error') }) }
+    if (!txid) return sendJson(res, 400, { error: 'Paste a share link (nft.sale/r/…) or a 64-character transaction id.' })
     try {
       const r = await importCollection(txid)
       if (!r) return sendJson(res, 404, { error: 'No media found in that transaction — is it a PharLap content mint?' })
