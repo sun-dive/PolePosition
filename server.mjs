@@ -1153,7 +1153,7 @@ const server = createServer(async (req, res) => {
       const aspect = url.searchParams.get('aspect') === '1:1' ? '1:1' : '16:9'
       const fpsReq = Number(url.searchParams.get('fps'))
       const fps = (format === 'mp4' ? [5, 7, 15, 24, 30] : [5, 7, 15]).includes(fpsReq) ? fpsReq : (format === 'mp4' ? 30 : 15)
-      const width = Math.min(Math.max(Number(url.searchParams.get('width')) || 480, 96), 1920) // up to 1080p for promo
+      const width = Math.min(Math.max(Number(url.searchParams.get('width')) || 480, 96), 4096) // up to 4K (special cases; lossless-crop a 4K source)
       const qParam = url.searchParams.get('q'), lossless = qParam === 'lossless'
       const q = Math.min(Math.max(Number(qParam) || 55, 1), 100)
       const W = Math.round(width / 2) * 2
