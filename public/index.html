@@ -25,6 +25,7 @@
       <button id="btnLyrics" class="ghost" type="button" title="Build a synced lyric (.lrc) timeline by tapping along to the song">🎤 Lyrics</button>
       <button id="btnFlac" class="ghost" type="button" title="Encode a WAV to lossless FLAC (max compression) for minting">🎚️ WAV→FLAC</button>
       <button id="btnVideo" class="ghost" type="button" title="Downsize a video (MP4/MOV) OR an existing animated WebP to a small looping WebP (16:9 or 1:1) — e.g. a square cover card for a resalable asset">🎥 Video→WebP</button>
+      <button id="btnBmc" class="ghost" type="button" title="Bundle several BMF media files into ONE .bmc set — mint it as a single collection (one owner), reference members individually by name">📦 BMC set</button>
 <button id="btnTag" class="ghost" type="button" title="Embed cover art, lyrics and tags into a FLAC or MP3 (in-app — no Kid3)">🏷️ Audio Tags</button>
       <button id="btnArt" class="ghost" type="button" title="Create art — book covers, chapter images, or 800×800 NFT art">🎨 Art</button>
       <button id="btnBookCover" class="ghost" type="button" title="Design a flat book cover (front or back) with perfect text + optional image, to feed into the 3D render">📖 Book Cover</button>
@@ -429,6 +430,22 @@
       <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
         <button id="videoBuild" class="ai-btn" type="button">🎥 Make WebP loop</button>
         <span id="videoStatus" class="dim" style="font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="bmcModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:640px">
+      <div class="modal-head"><b>📦 Make a BMC set</b><button id="bmcClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 12px">Bundle several BMF media files (e.g. the intensity variants of one scene) into a single <b>.bmc</b> set. Mint the .bmc in PharLap as <b>one collection</b> — the members are owned &amp; resold together, and each stays referenceable by name in future compositions (<code>{ tx, name }</code>).</p>
+      <div class="row" style="gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px">
+        <label class="ghost" style="cursor:pointer">➕ Add files<input id="bmcFiles" type="file" accept="image/*,audio/*,video/*,.webp,.mp3,.flac,.mp4" multiple hidden></label>
+        <label class="proj-field" style="flex:1 1 240px; display:flex; flex-direction:column; gap:3px; font-size:12px">Set name<input id="bmcName" type="text" placeholder="e.g. forgotten-hallway-power-set" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <ul id="bmcList" class="tl-lib" style="margin-bottom:10px"></ul>
+      <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
+        <button id="bmcExport" class="ai-btn" type="button">📦 Export .bmc</button>
+        <span id="bmcStatus" class="dim" style="font-size:12px"></span>
       </div>
     </div>
   </div>

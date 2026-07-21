@@ -1128,6 +1128,51 @@ function makeZip (entries) {
   return new Blob([...parts, ...central, new Uint8Array(eo)], { type: 'application/zip' })
 }
 
+/* ---- 📦 BMC set: bundle BMF media into one .bmc container (mint as a single collection; members by name) ---- */
+let bmcMembers = [] // { file, name, mime }
+const bmcMime = n => ({ webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', mp3: 'audio/mpeg', flac: 'audio/flac', wav: 'audio/wav', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'video/webm' })[(n.split('.').pop() || '').toLowerCase()] || 'application/octet-stream'
+const bmcKey = s => (s || 'member').replace(/\.[^.]+$/, '').replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'member'
+$('btnBmc').onclick = () => { $('bmcModal').hidden = false; bmcRenderMembers() }
+$('bmcClose').onclick = () => { $('bmcModal').hidden = true }
+$('bmcModal').addEventListener('click', e => { if (e.target === $('bmcModal')) $('bmcModal').hidden = true })
+function bmcRenderMembers () {
+  const ul = $('bmcList'); ul.textContent = ''
+  if (!bmcMembers.length) { const li = document.createElement('li'); li.className = 'dim'; li.style.fontSize = '12px'; li.textContent = 'No files yet — ➕ Add the media for this set (e.g. the 3 intensity loops).'; ul.append(li); return }
+  bmcMembers.forEach((m, i) => {
+    const li = document.createElement('li'); li.style.cssText = 'display:flex; gap:8px; align-items:center; padding:3px 0; font-size:12px'
+    const nm = document.createElement('input'); nm.value = m.name; nm.spellcheck = false; nm.title = 'reference name — used as { tx, name } in compositions'
+    nm.style.cssText = 'flex:0 0 190px; font-size:12px; font-family:monospace'
+    nm.oninput = () => { m.name = nm.value.trim() }
+    const info = document.createElement('span'); info.className = 'dim'; info.textContent = `${m.file.name} · ${Math.round(m.file.size / 1024)} KB`
+    const rm = document.createElement('button'); rm.className = 'ghost'; rm.type = 'button'; rm.textContent = '✕'; rm.style.marginLeft = 'auto'
+    rm.onclick = () => { bmcMembers.splice(i, 1); bmcRenderMembers() }
+    li.append(nm, info, rm); ul.append(li)
+  })
+}
+$('bmcFiles').onchange = () => {
+  for (const f of $('bmcFiles').files) bmcMembers.push({ file: f, name: bmcKey(f.name), mime: f.type || bmcMime(f.name) })
+  $('bmcFiles').value = ''; bmcRenderMembers()
+}
+$('bmcExport').onclick = async () => {
+  if (!bmcMembers.length) { $('bmcStatus').textContent = 'Add at least one file.'; return }
+  const seen = new Set(), members = [], entries = []
+  for (const m of bmcMembers) {
+    let base = bmcKey(m.name), name = base, k = 1
+    while (seen.has(name)) name = base + '-' + (++k)
+    seen.add(name)
+    const ext = (m.file.name.match(/\.[^.]+$/) || ['.bin'])[0]
+    const fileEntry = name + ext
+    entries.push({ name: fileEntry, bytes: new Uint8Array(await m.file.arrayBuffer()) })
+    members.push({ name, file: fileEntry, mime: m.mime || bmcMime(m.file.name) })
+  }
+  const setName = bmcKey(($('bmcName').value || '').replace(/\.bmc$/i, '')) || 'bmc-set'
+  const manifest = { bmc: 0, name: setName, members }
+  entries.unshift({ name: 'bmc.json', bytes: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) })
+  triggerDownload(makeZip(entries), setName + '.bmc')
+  const kb = Math.round(entries.reduce((s, e) => s + e.bytes.length, 0) / 1024)
+  $('bmcStatus').textContent = `Exported ${setName}.bmc — ${members.length} member${members.length === 1 ? '' : 's'}, ${kb} KB. Mint it in PharLap as ONE collection; reference members by name.`
+}
+
 /* --- Restore a saved project: ⬆ Load bundle (.zip) re-opens everything; ⬆ Load cue (.cue) rebuilds the
    timeline against clips already in the library. The bundle is the complete save file. --- */
 // Read a store-only ZIP (the format makeZip writes) by walking its local file headers — no inflate needed.
