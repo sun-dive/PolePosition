@@ -1696,6 +1696,7 @@ $('videoBuild').onclick = async () => {
   const fmt = $('videoFormat').value === 'mp4' ? 'mp4' : 'webp'
   const qs = new URLSearchParams({ format: fmt, aspect: $('videoAspect').value, fps: $('videoFps').value, width: $('videoWidth').value, q: $('videoQ').value })
   if (wmOn) { qs.set('wm', '1'); qs.set('wmPos', $('videoWmPos').value); qs.set('wmSize', $('videoWmSize').value) }
+  if ($('videoLossless').checked) qs.set('losslessCrop', '1')
   $('videoBuild').disabled = true; $('videoStatus').textContent = fmt === 'mp4' ? 'Rendering MP4… (constant frame rate + watermark — a moment)' : 'Converting… (downsizing + encoding the loop — large clips take a moment)'
   try {
     const r = await fetch('/api/video-webp?' + qs, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: videoFile })
@@ -1711,16 +1712,22 @@ $('videoBuild').onclick = async () => {
     if (hasSrc) setTimeout(syncLoops, 80) // let the result element attach first, then restart both together
     const kb = data.size / 1024, mb = data.size / 1048576
     const sizeStr = mb >= 1 ? mb.toFixed(2) + ' MB' : Math.round(kb) + ' KB'
-    $('videoInfo').textContent = `${data.width}×${data.height} · ${data.fps} fps · ${data.frames} frames · ${(data.duration || 0).toFixed(1)}s · ${sizeStr}${data.watermarked ? ' · 💧 watermarked' : ''}`
+    const cropTag = data.lossless ? ' · ✂️ lossless crop' : (data.losslessRequested ? ' · ⚠ scaled (source < target)' : '')
+    $('videoInfo').textContent = `${data.width}×${data.height} · ${data.fps} fps · ${data.frames} frames · ${(data.duration || 0).toFixed(1)}s · ${sizeStr}${data.watermarked ? ' · 💧 watermarked' : ''}${cropTag}`
+    const lossNote = data.losslessRequested && !data.lossless ? ' (source smaller than the target — scaled instead; pick a smaller width for a lossless crop)' : ''
     $('videoStatus').textContent = videoResultFmt === 'mp4'
-      ? `Made ${data.width}×${data.height} MP4 (${sizeStr}) — constant frame rate, ready for Kdenlive. Download + import.`
+      ? `Made ${data.width}×${data.height} MP4 (${sizeStr})${data.lossless ? ' — lossless crop' : ''}${lossNote} — constant frame rate, ready for Kdenlive. Download + import.`
       : (mb > 3
-        ? `Made (${sizeStr}) — large for on-chain; try a lower frame rate, smaller width, or a shorter clip.`
-        : `Made (${sizeStr}) — on-chain-friendly. Download + mint in PharLap.`)
+        ? `Made (${sizeStr})${lossNote} — large for on-chain; try a lower frame rate, smaller width, or a shorter clip.`
+        : `Made (${sizeStr})${data.lossless ? ' · ✂️ lossless' : ''}${lossNote} — on-chain-friendly. Download + mint in PharLap.`)
   } catch (e) { $('videoStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('videoBuild').disabled = false }
 }
 $('videoFormat').onchange = () => { $('videoBuild').textContent = $('videoFormat').value === 'mp4' ? '🎥 Make MP4' : '🎥 Make WebP loop' }
+// Lossless crop → default to the standard 1280×720 atom target (a lossless crop of the 1344×768 fal frame)
+$('videoLossless').onchange = () => {
+  if ($('videoLossless').checked) { $('videoAspect').value = '16:9'; if (Number($('videoWidth').value) < 1280) $('videoWidth').value = '1280' }
+}
 $('videoDownload').onclick = () => {
   if (!videoResultData) return
   const base = (videoFile ? videoFile.name.replace(/\.[^.]+$/, '') : 'clip').replace(/[^a-z0-9]+/gi, '-').toLowerCase()

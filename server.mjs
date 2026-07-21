@@ -464,6 +464,10 @@ async function losslessSequence (steps, outPath) {
 async function clipSize (p) {
   try { const info = await runCmd('webpmux', ['-info', p], true); const m = info.match(/Canvas size:\s*(\d+)\s*x\s*(\d+)/i); return m ? { w: +m[1], h: +m[2] } : null } catch { return null }
 }
+// Read a video's frame size (via ffprobe) → { w, h } or null. Used to decide if a lossless crop is possible.
+async function videoDims (p) {
+  try { const o = await runCmd('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x', p], true); const [w, h] = o.trim().split('x').map(Number); return (w && h) ? { w, h } : null } catch { return null }
+}
 
 // Reduce a clip to `stride` and (if needed) fit it to `target` size, returning a same-size WebP path. Lossless
 // webpmux remux when the clip is already at target size; ImageMagick coalesce + cover-crop + frame-drop
@@ -535,16 +539,16 @@ async function frameDurations (p) {
 // Export an animated WebP at a chosen resolution + frame rate. Resizing preserves aspect (target width);
 // a target fps resamples to constant frame rate while preserving real-time duration; fps 0 keeps native
 // (variable) timing. ffmpeg can't read our animated WebP, so this stays on ImageMagick + img2webp/webpmux.
-async function reencodeWebp (inPath, { width, height, fps, quality = 80, lossless = false }) {
+async function reencodeWebp (inPath, { width, height, fps, quality = 80, lossless = false, losslessCrop = false }) {
   const base = join(tmpdir(), 'pp-exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
   const dir = base + '-f'
   await mkdir(dir, { recursive: true })
   const out = base + '.webp'
   try {
-    // width+height → crop-to-fit an exact WxH (cover: scale to fill, centre-crop — no distortion, e.g. 7:4→16:9).
-    // width only → scale to that width, keep source aspect.  neither → native.
+    // width+height → an exact WxH. losslessCrop = pure centre-crop (no resample; caller has verified source≥WxH);
+    // else crop-to-fit (scale to fill, centre-crop). width only → scale to that width. neither → native.
     const scale = (width && height)
-      ? ['-resize', `${width}x${height}^`, '-gravity', 'center', '-extent', `${width}x${height}`]
+      ? (losslessCrop ? ['-gravity', 'center', '-extent', `${width}x${height}`] : ['-resize', `${width}x${height}^`, '-gravity', 'center', '-extent', `${width}x${height}`])
       : width ? ['-resize', String(width) + 'x'] : []
     await runCmd('magick', [inPath, '-coalesce', ...scale, join(dir, 'rf-%04d.png')])
     const files = (await readdir(dir)).filter(f => f.startsWith('rf-')).sort()
@@ -582,14 +586,14 @@ async function reencodeWebp (inPath, { width, height, fps, quality = 80, lossles
 // as a % of the cover's width (so one watermark looks consistent across 512 / 400 / 256 covers). Optional
 // `width`+`height` crop-to-fit the frames FIRST, so resize + watermark + encode happen in ONE lossy pass
 // (no double re-encode). The PNG's own alpha (e.g. a baked-in halo) is respected. Returns a new WebP path.
-async function watermarkWebp (inPath, wmPath, { pos = 'se', sizePct = 15, marginPct = 3, quality = 80, lossless = false, width = 0, height = 0 }) {
+async function watermarkWebp (inPath, wmPath, { pos = 'se', sizePct = 15, marginPct = 3, quality = 80, lossless = false, width = 0, height = 0, losslessCrop = false }) {
   const G = { nw: 'NorthWest', n: 'North', ne: 'NorthEast', w: 'West', center: 'Center', e: 'East', sw: 'SouthWest', s: 'South', se: 'SouthEast' }[pos] || 'SouthEast'
   const base = join(tmpdir(), 'pp-wm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
   const dir = base + '-f'; await mkdir(dir, { recursive: true })
   const out = base + '.webp'
   try {
     // crop-to-fit to WxH when given (single-pass resize), else keep native size.
-    const resize = (width && height) ? ['-resize', `${width}x${height}^`, '-gravity', 'center', '-extent', `${width}x${height}`] : []
+    const resize = (width && height) ? (losslessCrop ? ['-gravity', 'center', '-extent', `${width}x${height}`] : ['-resize', `${width}x${height}^`, '-gravity', 'center', '-extent', `${width}x${height}`]) : []
     const sz = (width && height) ? { w: width, h: height } : (await clipSize(inPath) || { w: 512, h: 512 })
     const wmW = Math.max(8, Math.round(sz.w * Math.min(Math.max(sizePct, 1), 80) / 100))
     const mg = Math.round(sz.w * Math.min(Math.max(marginPct, 0), 25) / 100)
@@ -624,7 +628,7 @@ const mp4Crf = q => Math.min(30, Math.max(15, Math.round(30 - (Number(q) || 80) 
 // Turn an animated WebP into a CONSTANT-frame-rate H.264 MP4 (Kdenlive-safe — editors mishandle our variable
 // per-frame timing), optionally with a watermark burned in. Silent (mix audio in your editor). Coalesce →
 // cover-fit to WxH → watermark each unique frame → resample the loop to a constant fps → libx264. Returns path.
-async function webpToMp4 (inPath, { width, height, fps = 30, quality = 80, wmPath = '', wmPos = 'se', wmSize = 15, wmMargin = 3 }) {
+async function webpToMp4 (inPath, { width, height, fps = 30, quality = 80, wmPath = '', wmPos = 'se', wmSize = 15, wmMargin = 3, losslessCrop = false }) {
   const base = join(tmpdir(), 'pp-wm4-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
   const dir = base + '-f'; await mkdir(dir, { recursive: true })
   const out = base + '.mp4'
@@ -632,7 +636,8 @@ async function webpToMp4 (inPath, { width, height, fps = 30, quality = 80, wmPat
     let W = width, H = height
     if (!(W && H)) { const sz = await clipSize(inPath) || { w: 1280, h: 720 }; W = sz.w; H = sz.h }
     W -= W % 2; H -= H % 2; W = Math.max(2, W); H = Math.max(2, H)
-    await runCmd('magick', [inPath, '-coalesce', '-resize', `${W}x${H}^`, '-gravity', 'center', '-extent', `${W}x${H}`, join(dir, 'u-%04d.png')])
+    const fit = losslessCrop ? ['-gravity', 'center', '-extent', `${W}x${H}`] : ['-resize', `${W}x${H}^`, '-gravity', 'center', '-extent', `${W}x${H}`]
+    await runCmd('magick', [inPath, '-coalesce', ...fit, join(dir, 'u-%04d.png')])
     let frames = (await readdir(dir)).filter(f => f.startsWith('u-')).sort().map(f => join(dir, f))
     if (!frames.length) throw new Error('could not read frames')
     if (wmPath && existsSync(wmPath)) { // burn the watermark onto each unique frame (cheap — before resampling)
@@ -1164,14 +1169,21 @@ const server = createServer(async (req, res) => {
         quality: q, lossless
       }
       const isWebp = buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP'
+      // Lossless crop: when the source frame is ≥ the target WxH, centre-crop with NO scaling (every output
+      // pixel is a native source pixel — max fidelity for on-chain). Falls back to scale-crop if the source is
+      // smaller (can't losslessly reach WxH). Requires knowing the source dimensions up front.
+      const losslessCropReq = url.searchParams.get('losslessCrop') === '1'
+      let srcSz = null
+      if (losslessCropReq) srcSz = isWebp ? await clipSize(inPath) : await videoDims(inPath)
+      const doLossless = losslessCropReq && !!srcSz && srcSz.w >= W && srcSz.h >= H
 
       // ── MP4 (promo/editor source): constant frame rate, watermark burned in, no audio ──
       if (format === 'mp4') {
         if (isWebp) { // animated WebP → coalesce/resample to CFR (ffmpeg can't decode it directly)
-          const mp4 = await webpToMp4(inPath, { width: W, height: H, fps, quality: q, wmPath: wmOn ? WM_FILE : '', wmPos: wmOpts.pos, wmSize: wmOpts.sizePct, wmMargin: wmOpts.marginPct })
+          const mp4 = await webpToMp4(inPath, { width: W, height: H, fps, quality: q, wmPath: wmOn ? WM_FILE : '', wmPos: wmOpts.pos, wmSize: wmOpts.sizePct, wmMargin: wmOpts.marginPct, losslessCrop: doLossless })
           if (mp4 !== mp4Path) { await writeFile(mp4Path, await readFile(mp4)); await unlink(mp4).catch(() => {}) }
         } else { // real video → native ffmpeg transcode + optional overlay watermark
-          const chain = [`fps=${fps}`, `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos`, `crop=${W}:${H}`].join(',')
+          const chain = doLossless ? `fps=${fps},crop=${W}:${H}` : `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`
           const args = ['-y', '-i', inPath]
           if (wmOn) {
             const wmW = Math.max(8, Math.round(W * Math.min(Math.max(wmOpts.sizePct, 1), 80) / 100))
@@ -1186,7 +1198,7 @@ const server = createServer(async (req, res) => {
         const out = await readFile(mp4Path)
         let duration = 0
         try { duration = parseFloat((await runCmd('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', mp4Path], true)).trim()) || 0 } catch { /* leave 0 */ }
-        return sendJson(res, 200, { dataUrl: 'data:video/mp4;base64,' + out.toString('base64'), size: out.length, frames: Math.round(duration * fps), duration, width: W, height: H, fps, format: 'mp4', watermarked: wmOn })
+        return sendJson(res, 200, { dataUrl: 'data:video/mp4;base64,' + out.toString('base64'), size: out.length, frames: Math.round(duration * fps), duration, width: W, height: H, fps, format: 'mp4', watermarked: wmOn, lossless: doLossless, losslessRequested: losslessCropReq })
       }
 
       // ── WebP (on-chain cover): keep native VFR timing ──
@@ -1196,10 +1208,10 @@ const server = createServer(async (req, res) => {
         let raw
         if (wmOn) {
           // single pass: crop-to-fit + watermark + encode straight from the source (no intermediate re-encode)
-          const wmOut = await watermarkWebp(inPath, WM_FILE, { ...wmOpts, width: W, height: H })
+          const wmOut = await watermarkWebp(inPath, WM_FILE, { ...wmOpts, width: W, height: H, losslessCrop: doLossless })
           raw = await readFile(wmOut); await unlink(wmOut).catch(() => {}); await writeFile(outPath, raw)
         } else {
-          const dataUrl0 = await reencodeWebp(inPath, { width: W, height: H, fps: 0, quality: q, lossless })
+          const dataUrl0 = await reencodeWebp(inPath, { width: W, height: H, fps: 0, quality: q, lossless, losslessCrop: doLossless })
           raw = Buffer.from(dataUrl0.slice(dataUrl0.indexOf(',') + 1), 'base64'); await writeFile(outPath, raw)
         }
         let frames = 0, duration = 0
@@ -1207,12 +1219,12 @@ const server = createServer(async (req, res) => {
           const delays = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).map(n => parseInt(n, 10) || 0)
           frames = delays.length; duration = delays.reduce((a, b) => a + b, 0) / 100
         } catch { /* leave 0 */ }
-        return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + raw.toString('base64'), size: raw.length, frames, duration, width: W, height: H, fps: 0, format: 'webp', watermarked: wmOn })
+        return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + raw.toString('base64'), size: raw.length, frames, duration, width: W, height: H, fps: 0, format: 'webp', watermarked: wmOn, lossless: doLossless, losslessRequested: losslessCropReq })
       }
       // cover-crop: scale up to fill WxH (keeping the source aspect), then centre-crop to exactly WxH — robust
       // for any input shape (16:9 in → no crop; other shapes → trimmed to the chosen frame), then drop the fps.
       // Watermark (if on) is overlaid in the SAME ffmpeg pass — no second re-encode.
-      const chain = `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`
+      const chain = doLossless ? `fps=${fps},crop=${W}:${H}` : `fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`
       const encArgs = lossless ? ['-lossless', '1', '-q:v', '100'] : ['-lossless', '0', '-q:v', String(q)]
       const wArgs = ['-y', '-i', inPath]
       if (wmOn) {
@@ -1228,7 +1240,7 @@ const server = createServer(async (req, res) => {
       let frames = 0
       try { frames = (await runCmd('magick', ['identify', '-format', '%T\n', outPath], true)).trim().split('\n').filter(Boolean).length } catch { /* leave 0 */ }
       const duration = frames ? frames / fps : 0
-      return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + out.toString('base64'), size: out.length, frames, duration, width: W, height: H, fps, format: 'webp', watermarked: wmOn })
+      return sendJson(res, 200, { dataUrl: 'data:image/webp;base64,' + out.toString('base64'), size: out.length, frames, duration, width: W, height: H, fps, format: 'webp', watermarked: wmOn, lossless: doLossless, losslessRequested: losslessCropReq })
     } catch (e) {
       return sendJson(res, 502, { error: 'video conversion failed: ' + (e.message || 'error') })
     } finally {

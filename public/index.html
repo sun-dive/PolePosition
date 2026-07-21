@@ -395,6 +395,9 @@
             <option value="lossless">Lossless</option>
           </select>
         </label>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; align-self:flex-end; padding-bottom:5px" title="Centre-crop with NO scaling — every output pixel is a native source pixel (max fidelity for on-chain). Needs the source ≥ the target size; otherwise it falls back to scale-crop.">
+          <input id="videoLossless" type="checkbox"> ✂️ Lossless crop
+        </label>
       </div>
 
       <div id="videoWmRow" class="vid-controls" style="border-top:1px solid rgba(255,255,255,.08); padding-top:12px">
