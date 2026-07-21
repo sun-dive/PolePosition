@@ -1038,7 +1038,7 @@ function bmfManifest () {
     const e = tlLib.get(p.name)
     const s = { t: Math.round(p.t * 100) / 100 }
     if (e && /^[0-9a-f]{64}$/i.test(e.tx || '')) s.tx = e.tx.toLowerCase()
-    s.name = p.name
+    s.name = (e && e.member) ? e.member : p.name // a BMC-set member resolves by its member name, not its filename
     return s
   })
   const manifest = { bmf: 0 }
@@ -1291,7 +1291,7 @@ async function saveTimelineState () {
   try {
     const clips = [], want = new Set(['meta'])
     for (const [name, e] of tlLib) {
-      clips.push({ name, dur: e.dur, tx: e.tx || '' }); const key = 'clip:' + name; want.add(key)
+      clips.push({ name, dur: e.dur, tx: e.tx || '', member: e.member || '' }); const key = 'clip:' + name; want.add(key)
       if (!mvPersisted.has(key)) { await mvPut(key, e.file); mvPersisted.add(key) }
     }
     if (tlAudioFile) {
@@ -1316,7 +1316,7 @@ async function restoreTimelineState () {
       if (blob) { files.push(new File([blob], c.name, { type: mimeFromName(c.name) })); mvPersisted.add('clip:' + c.name) }
     }
     if (files.length) await addLibFiles(files)
-    for (const c of (meta.clips || [])) { const e = tlLib.get(c.name); if (e && c.tx) e.tx = c.tx } // reapply saved txids
+    for (const c of (meta.clips || [])) { const e = tlLib.get(c.name); if (e && c.tx) e.tx = c.tx; if (e && c.member) e.member = c.member } // reapply saved txids + set-member refs
     if (meta.audioTx) { tlAudioTx = meta.audioTx; const el = $('tlAudioTx'); if (el) el.value = tlAudioTx }
     if (meta.license && $('tlLicense')) $('tlLicense').value = meta.license
     if (meta.attribution && $('tlAttribution')) $('tlAttribution').value = meta.attribution
@@ -1426,6 +1426,20 @@ async function doImport (ref) {
     const r = await fetch('/api/import-mint', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref }) })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) { $('tlImportStatus').textContent = d.error || ('Error ' + r.status); return }
+    // A BMC set → add every member as a clip, each referenced as { tx: setTxid, name: member }.
+    if (d.isSet) {
+      let added = 0
+      for (const mem of d.members) {
+        const mblob = await (await fetch(mem.dataUrl)).blob()
+        const fname = mem.file || (mem.name + '.webp')
+        await addLibFiles([new File([mblob], fname, { type: mem.mimeType || mblob.type })])
+        const e = tlLib.get(fname); if (e) { e.tx = d.txid; e.member = mem.name; added++ }
+      }
+      renderLib(); refreshSceneSelects(); saveTimelineSoon()
+      $('tlImportStatus').textContent = `Imported set “${d.setName}” — ${added} member${added === 1 ? '' : 's'} (referenced as ${(d.txid || '').slice(0, 8)}…:name) ${d.cached ? '⚡ from cache' : 'from chain'}. Place any of them on the timeline.`
+      $('tlImportTx').value = ''
+      return
+    }
     const blob = await (await fetch(d.dataUrl)).blob()
     const name = d.fileName || ('atom-' + (d.txid || '').slice(0, 8) + '.webp')
     const file = new File([blob], name, { type: d.mimeType || blob.type })

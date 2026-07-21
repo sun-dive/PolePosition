@@ -10,7 +10,7 @@ import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildEpub } from './epub.mjs'
-import { importCollection, listCreatorAtoms, creatorIdentity } from './vendor/pharlap/bmf-import.bundle.mjs' // fetch/decrypt an on-chain atom + discover a creator's atoms (esbuild bundle — Electron-safe, run `npm run build:vendor` after editing the vendored decoders)
+import { importCollection, listCreatorAtoms, creatorIdentity, parseBmcSet } from './vendor/pharlap/bmf-import.bundle.mjs' // fetch/decrypt an on-chain atom, discover a creator's atoms, unpack a BMC set (esbuild bundle — Electron-safe, run `npm run build:vendor` after editing the vendored decoders)
 import { spawn } from 'node:child_process'
 import { tmpdir, homedir } from 'node:os'
 import { unlink, readdir, rm } from 'node:fs/promises'
@@ -816,6 +816,15 @@ const server = createServer(async (req, res) => {
         buf = Buffer.from(r.bytes)
         meta = { fileName: r.fileName, mimeType: r.mimeType || 'application/octet-stream', encrypted: r.encrypted, verified: r.verified, legacy: r.legacy || null, sha256: r.sha256 }
         if (meta.verified) await cachedAtomPut(txid, meta, buf) // only cache content that verified against the chain
+      }
+      // A BMC set (store-only ZIP + bmc.json) → return every member so the UI can add them all, each
+      // referenceable by { tx: <setTxid>, name: <member> }.
+      const set = parseBmcSet(buf)
+      if (set) {
+        return sendJson(res, 200, {
+          txid, isSet: true, setName: set.name, cached, encrypted: meta.encrypted, verified: meta.verified,
+          members: set.members.map(m => ({ name: m.name, file: m.file, mimeType: m.mimeType, size: m.bytes.length, dataUrl: 'data:' + m.mimeType + ';base64,' + Buffer.from(m.bytes).toString('base64') }))
+        })
       }
       const mime = meta.mimeType || 'application/octet-stream'
       return sendJson(res, 200, { txid, fileName: meta.fileName, mimeType: mime, size: buf.length, encrypted: meta.encrypted, verified: meta.verified, legacy: meta.legacy || null, sha256: meta.sha256, cached, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') })
