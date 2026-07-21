@@ -1680,28 +1680,48 @@ $('flacEncode').onclick = async () => {
 }
 
 /* ---- 🎥 Video → looping animated WebP: downsize a trimmed MP4/MOV for on-chain motion content ---- */
-let videoFile = null, videoResultData = '', videoResultFmt = 'webp', videoSrcUrl = ''
+let videoFiles = [], videoFile = null, videoResultData = '', videoResultFmt = 'webp', videoSrcUrl = ''
 $('btnVideo').onclick = () => { $('videoModal').hidden = false; loadWatermark() }
 $('videoClose').onclick = () => { $('videoModal').hidden = true }
 $('videoModal').addEventListener('click', e => { if (e.target === $('videoModal')) $('videoModal').hidden = true })
+const videoNameLabel = () => videoFiles.length > 1 ? `${videoFiles.length} clips — joined in order` : (videoFiles[0] ? videoFiles[0].name : '')
+function videoSetPreview () { // preview the FIRST clip in the join order
+  if (videoSrcUrl) { URL.revokeObjectURL(videoSrcUrl); videoSrcUrl = '' }
+  const img = $('videoSrcImg'), vid = $('videoSrcVid'), empty = $('videoSrcEmpty'), f = videoFiles[0]
+  if (f) {
+    videoSrcUrl = URL.createObjectURL(f)
+    const isWebp = /\.webp$/i.test(f.name) || f.type === 'image/webp'
+    empty.hidden = true
+    if (isWebp) { vid.hidden = true; vid.removeAttribute('src'); img.hidden = false; img.src = videoSrcUrl }
+    else { img.hidden = true; img.removeAttribute('src'); vid.hidden = false; vid.src = videoSrcUrl; vid.play?.().catch(() => {}) }
+  } else { img.hidden = true; vid.hidden = true; empty.hidden = false }
+}
+function renderJoinList () { // reorderable join order (only shown when joining 2+)
+  const ul = $('videoJoinList')
+  if (videoFiles.length <= 1) { ul.hidden = true; ul.textContent = ''; return }
+  ul.hidden = false; ul.textContent = ''
+  const swap = (a, b) => { [videoFiles[a], videoFiles[b]] = [videoFiles[b], videoFiles[a]]; videoFile = videoFiles[0]; renderJoinList(); videoSetPreview() }
+  videoFiles.forEach((f, i) => {
+    const li = document.createElement('li'); li.style.cssText = 'display:flex; gap:6px; align-items:center; font-size:12px; padding:2px 0'
+    const n = document.createElement('span'); n.textContent = `${i + 1}. ${f.name}`; n.style.cssText = 'flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap'
+    const up = document.createElement('button'); up.className = 'ghost'; up.type = 'button'; up.textContent = '↑'; up.disabled = i === 0; up.onclick = () => swap(i, i - 1)
+    const dn = document.createElement('button'); dn.className = 'ghost'; dn.type = 'button'; dn.textContent = '↓'; dn.disabled = i === videoFiles.length - 1; dn.onclick = () => swap(i, i + 1)
+    const rm = document.createElement('button'); rm.className = 'ghost'; rm.type = 'button'; rm.textContent = '✕'; rm.onclick = () => { videoFiles.splice(i, 1); videoFile = videoFiles[0] || null; $('videoName').textContent = videoNameLabel(); renderJoinList(); videoSetPreview() }
+    li.append(n, up, dn, rm); ul.append(li)
+  })
+}
 $('videoInput').onchange = () => {
-  videoFile = $('videoInput').files[0] || null
-  $('videoName').textContent = videoFile ? videoFile.name : ''
+  const picked = Array.from($('videoInput').files || [])
+  if (picked.length) videoFiles.push(...picked) // append across picks so you can build the join order
+  $('videoInput').value = ''
+  videoFile = videoFiles[0] || null
+  $('videoName').textContent = videoNameLabel()
   $('videoStatus').textContent = ''
   // reset the result panel
   $('videoImg').hidden = true; $('videoImg').removeAttribute('src')
   $('videoVid').hidden = true; $('videoVid').removeAttribute('src')
   $('videoResultEmpty').hidden = false; $('videoResultActions').hidden = true; $('videoSyncRow').hidden = true
-  // Source thumbnail: animated WebP → <img> (browsers render it); video file → <video>.
-  if (videoSrcUrl) { URL.revokeObjectURL(videoSrcUrl); videoSrcUrl = '' }
-  const img = $('videoSrcImg'), vid = $('videoSrcVid'), empty = $('videoSrcEmpty')
-  if (videoFile) {
-    videoSrcUrl = URL.createObjectURL(videoFile)
-    const isWebp = /\.webp$/i.test(videoFile.name) || videoFile.type === 'image/webp'
-    empty.hidden = true
-    if (isWebp) { vid.hidden = true; vid.removeAttribute('src'); img.hidden = false; img.src = videoSrcUrl }
-    else { img.hidden = true; img.removeAttribute('src'); vid.hidden = false; vid.src = videoSrcUrl; vid.play?.().catch(() => {}) }
-  } else { img.hidden = true; vid.hidden = true; empty.hidden = false }
+  renderJoinList(); videoSetPreview()
 }
 // Sync loops for A/B compare. <video> seeks to 0; animated-WebP <img> has no seek API so re-assign src to
 // restart from frame 0. Source + result share the same total loop length, so restarting both together keeps
@@ -1750,15 +1770,34 @@ $('videoWmPos').onchange = saveWmSettings
 $('videoWmSize').onchange = saveWmSettings
 
 $('videoBuild').onclick = async () => {
-  if (!videoFile) { $('videoStatus').textContent = 'Choose a video first.'; return }
+  if (!videoFiles.length) { $('videoStatus').textContent = 'Choose a video first.'; return }
   const wmOn = $('videoWmOn').checked && wmSet
   const fmt = $('videoFormat').value === 'mp4' ? 'mp4' : 'webp'
+  const joining = videoFiles.length > 1
   const qs = new URLSearchParams({ format: fmt, aspect: $('videoAspect').value, fps: $('videoFps').value, width: $('videoWidth').value, q: $('videoQ').value })
   if (wmOn) { qs.set('wm', '1'); qs.set('wmPos', $('videoWmPos').value); qs.set('wmSize', $('videoWmSize').value) }
   if ($('videoLossless').checked) qs.set('losslessCrop', '1')
-  $('videoBuild').disabled = true; $('videoStatus').textContent = fmt === 'mp4' ? 'Rendering MP4… (constant frame rate + watermark — a moment)' : 'Converting… (downsizing + encoding the loop — large clips take a moment)'
+  $('videoBuild').disabled = true
   try {
-    const r = await fetch('/api/video-webp?' + qs, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: videoFile })
+    let r
+    if (joining) {
+      // Upload each clip, then join them server-side (coalesced opaque, so alpha+blend clips don't corrupt).
+      const names = []
+      for (let i = 0; i < videoFiles.length; i++) {
+        $('videoStatus').textContent = `Uploading clip ${i + 1}/${videoFiles.length} to join…`
+        const f = videoFiles[i], ext = (f.name.split('.').pop() || 'webp').toLowerCase()
+        const up = await fetch('/api/render-clip?ext=' + ext, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: f })
+        const uj = await up.json().catch(() => ({}))
+        if (!up.ok || !uj.file) { $('videoStatus').textContent = 'Upload failed: ' + (uj.error || up.status); return }
+        names.push(uj.file)
+      }
+      qs.set('join', names.join(','))
+      $('videoStatus').textContent = `Joining ${videoFiles.length} clips + ${fmt === 'mp4' ? 'rendering MP4' : 'encoding the loop'}…`
+      r = await fetch('/api/video-webp?' + qs, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    } else {
+      $('videoStatus').textContent = fmt === 'mp4' ? 'Rendering MP4… (constant frame rate + watermark — a moment)' : 'Converting… (downsizing + encoding the loop — large clips take a moment)'
+      r = await fetch('/api/video-webp?' + qs, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: videoFiles[0] })
+    }
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('videoStatus').textContent = data.error || ('Error ' + r.status); return }
     videoResultData = data.dataUrl; videoResultFmt = data.format || fmt

@@ -329,9 +329,10 @@
       <div class="modal-head"><b>🎥 Video → looping WebP / MP4</b><button id="videoClose" class="ghost" type="button">✕</button></div>
       <p class="dim" style="font-size:12px; margin:0 0 10px"><b>WebP</b> = small looping <b>cover card</b> for on-chain (native timing). <b>MP4</b> = high-res, watermarked, <b>constant-frame-rate</b> promo source for Kdenlive/social (editors mishandle WebP's variable timing; add audio in the editor). <b>Keep it short</b> — length drives file size most.</p>
       <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
-        <label class="ghost" style="cursor:pointer">🎬 Choose video or WebP<input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,image/webp,.mp4,.mov,.webm,.mkv,.webp" hidden></label>
+        <label class="ghost" style="cursor:pointer">🎬 Choose video / WebP (one or several to join)<input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,image/webp,.mp4,.mov,.webm,.mkv,.webp" multiple hidden></label>
         <span id="videoName" class="dim" style="font-size:12px"></span>
       </div>
+      <ul id="videoJoinList" class="tl-lib" hidden style="margin:-4px 0 10px"></ul>
 
       <!-- previews at the top of two aligned columns -->
       <div class="vid-previews">

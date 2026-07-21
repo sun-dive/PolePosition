@@ -668,6 +668,34 @@ async function webpToMp4 (inPath, { width, height, fps = 30, quality = 80, wmPat
     return out
   } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}) }
 }
+
+// Join several clips into ONE animated WebP, in order, preserving each clip's per-frame timing. Every clip is
+// COALESCED to opaque full frames first — so inter-frame-optimized (alpha+blend) clips don't corrupt on
+// re-processing — and cover-fit to the largest clip's canvas. Output is LOSSLESS (the caller re-encodes to the
+// final quality, so there's one lossy pass). Writes the joined WebP to `outPath`.
+async function joinClips (paths, outPath) {
+  const base = join(tmpdir(), 'pp-jn-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))
+  const dir = base + '-f'; await mkdir(dir, { recursive: true })
+  try {
+    let target = null
+    for (const p of paths) { const sz = await clipSize(p); if (sz && (!target || sz.w * sz.h > target.w * target.h)) target = sz }
+    if (!target) target = { w: 1280, h: 720 }
+    const W = target.w - target.w % 2, H = target.h - target.h % 2
+    const frameArgs = []
+    let gi = 0
+    for (const p of paths) {
+      const cdir = join(dir, 'c' + gi); await mkdir(cdir, { recursive: true })
+      await runCmd('magick', [p, '-coalesce', '-alpha', 'off', '-resize', `${W}x${H}^`, '-gravity', 'center', '-extent', `${W}x${H}`, join(cdir, 'f-%04d.png')])
+      const frames = (await readdir(cdir)).filter(f => f.startsWith('f-')).sort()
+      const delays = (await runCmd('magick', ['identify', '-format', '%T\n', p], true)).trim().split('\n').filter(Boolean)
+      for (let i = 0; i < frames.length; i++) frameArgs.push('-delay', String(parseInt(delays[i] || '13', 10) || 13), join(cdir, frames[i]))
+      gi++
+    }
+    if (!frameArgs.length) throw new Error('no frames to join')
+    // webp: prefix forces WebP output even though outPath has no extension (it reuses the pipeline's inPath).
+    await runCmd('magick', ['-loop', '0', ...frameArgs, '-define', 'webp:lossless=true', 'webp:' + outPath])
+  } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}) }
+}
 // Flatten a music-video timeline (clips looping under a song) into ONE file at a chosen resolution + frame rate.
 // Each placement shows its clip, looping from its cue until the next cue; the video runs the song's length.
 // format 'mp4' → H.264 + AAC (with the soundtrack); 'webp' → silent animated WebP. Returns the output path.
@@ -1152,10 +1180,21 @@ const server = createServer(async (req, res) => {
     const stamp = Date.now() + '-' + Math.random().toString(36).slice(2, 8)
     const inPath = join(tmpdir(), 'pp-vid-' + stamp), outPath = join(tmpdir(), 'pp-vid-' + stamp + '.webp')
     const mp4Path = join(tmpdir(), 'pp-vid-' + stamp + '.mp4'), wmvPath = join(tmpdir(), 'pp-wmv-' + stamp + '.png')
+    let joinPaths = []
     try {
-      const buf = await readRawBody(req, 400 * 1024 * 1024) // up to 400 MB source clip
-      if (buf.length === 0) return sendJson(res, 400, { error: 'no video uploaded' })
-      await writeFile(inPath, buf)
+      // Source: a raw-body single file, OR (join mode) several previously-uploaded clips (pp-rclip-*) joined
+      // in order — each coalesced to OPAQUE frames first so inter-frame (alpha+blend) clips don't corrupt.
+      joinPaths = (url.searchParams.get('join') || '').split(',').map(s => s.replace(/[^a-z0-9._-]/gi, ''))
+        .filter(n => n.startsWith('pp-rclip-')).map(n => join(tmpdir(), n)).filter(p => existsSync(p))
+      let buf = null
+      const joined = joinPaths.length > 0
+      if (joined) {
+        await joinClips(joinPaths, inPath) // → a lossless opaque WebP; the pipeline below re-encodes to final quality
+      } else {
+        buf = await readRawBody(req, 400 * 1024 * 1024) // up to 400 MB source clip
+        if (buf.length === 0) return sendJson(res, 400, { error: 'no video uploaded' })
+        await writeFile(inPath, buf)
+      }
       // format 'webp' = on-chain cover (small, VFR-native). 'mp4' = promo/editor source — CONSTANT frame rate
       // H.264 (Kdenlive & friends mishandle our variable per-frame timing), silent (mix audio in the editor).
       const format = url.searchParams.get('format') === 'mp4' ? 'mp4' : 'webp'
@@ -1177,7 +1216,7 @@ const server = createServer(async (req, res) => {
         marginPct: wmMarginRaw != null && wmMarginRaw !== '' ? Number(wmMarginRaw) : WM.margin,
         quality: q, lossless
       }
-      const isWebp = buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP'
+      const isWebp = joined || (buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP')
       // Lossless crop: when the source frame is ≥ the target WxH, centre-crop with NO scaling (every output
       // pixel is a native source pixel — max fidelity for on-chain). Falls back to scale-crop if the source is
       // smaller (can't losslessly reach WxH). Requires knowing the source dimensions up front.
@@ -1254,6 +1293,7 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 502, { error: 'video conversion failed: ' + (e.message || 'error') })
     } finally {
       await unlink(inPath).catch(() => {}); await unlink(outPath).catch(() => {}); await unlink(mp4Path).catch(() => {}); await unlink(wmvPath).catch(() => {})
+      for (const p of joinPaths) await unlink(p).catch(() => {}) // clean the uploaded join-source clips
     }
   }
 
