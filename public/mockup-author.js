@@ -1,6 +1,6 @@
 // Product-mockup authoring (Pole Position). Compose a design onto a reusable prop, preview live via the shared
 // renderer (mockup-render.js), and export a bundle (prop images + a recipe) for PharLap to mint. Classic script,
-// loaded AFTER app.js + mockup-render.js — reuses app.js globals (makeZip, triggerDownload, toWebpForExport) and
+// loaded AFTER app.js + mockup-render.js — reuses app.js globals (makeZip, triggerDownload) and
 // window.MockupRender. See docs/MOCKUP-SPEC.md.
 (function () {
   'use strict'
@@ -143,16 +143,40 @@
   canvas.addEventListener('pointerup', endDrag)
   canvas.addEventListener('pointercancel', endDrag)
 
-  // Export the prop images (as WebP) + a readable recipe, in one store-only .bmc bundle for PharLap to mint.
+  // Props display at a few hundred px on a cover, so 2048² source is ~4× waste. Downscale on export (resample —
+  // keeps the whole subject, unlike a crop) then WebP-encode → a big on-chain saving, imperceptible at cover size.
+  var PROP_MAX = 1024   // base + maps
+  var DESIGN_MAX = 1280 // the focal artwork gets a touch more detail
+  function toWebpScaled(file, maxDim, quality) {
+    quality = quality == null ? 0.9 : quality
+    return createImageBitmap(file).then(function (bmp) {
+      var scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height)) // only ever shrink, never upscale
+      var tw = Math.max(1, Math.round(bmp.width * scale)), th = Math.max(1, Math.round(bmp.height * scale))
+      var cv = document.createElement('canvas'); cv.width = tw; cv.height = th
+      var c = cv.getContext('2d'); c.imageSmoothingQuality = 'high'
+      c.drawImage(bmp, 0, 0, tw, th)
+      if (bmp.close) bmp.close()
+      return new Promise(function (res, rej) {
+        cv.toBlob(function (b) {
+          if (!b) { rej(new Error('WebP encode failed')); return }
+          b.arrayBuffer().then(function (ab) { res(new Uint8Array(ab)) })
+        }, 'image/webp', quality)
+      })
+    })
+  }
+
+  // Export the (downscaled) prop images + a readable recipe, in one store-only .bmc bundle for PharLap to mint.
   function exportBundle() {
     if (!(st.base && st.design)) return
     var name = ($('mkName').value.trim() || 'mockup').replace(/[^a-z0-9._-]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'mockup'
     $('mkStatus').textContent = 'Packing…'
     var entries = [], roles = { base: 'base.webp' }
-    var jobs = [toWebpForExport('base.png', st.baseFile).then(function (e) { e.name = 'base.webp'; entries.push(e) }),
-                toWebpForExport('design.png', st.designFile).then(function (e) { e.name = 'design.webp'; entries.push(e) })]
+    var jobs = [
+      toWebpScaled(st.baseFile, PROP_MAX).then(function (b) { entries.push({ name: 'base.webp', bytes: b }) }),
+      toWebpScaled(st.designFile, DESIGN_MAX).then(function (b) { entries.push({ name: 'design.webp', bytes: b }) }),
+    ]
     ;['mask', 'shade', 'disp'].forEach(function (k) {
-      if (st.mapFiles[k]) jobs.push(toWebpForExport(k + '.png', st.mapFiles[k]).then(function (e) { e.name = k + '.webp'; entries.push(e); roles[k] = k + '.webp' }))
+      if (st.mapFiles[k]) jobs.push(toWebpScaled(st.mapFiles[k], PROP_MAX).then(function (b) { entries.push({ name: k + '.webp', bytes: b }); roles[k] = k + '.webp' }))
     })
     Promise.all(jobs).then(function () {
       var s = designSize()
@@ -164,8 +188,9 @@
         fabric: st.fabric,
       }
       entries.push({ name: 'mockup.json', bytes: new TextEncoder().encode(JSON.stringify(recipe, null, 2)) })
-      triggerDownload(makeZip(entries), name + '-mockup.bmc')
-      $('mkStatus').textContent = 'Exported ' + name + '-mockup.bmc — mint it in PharLap.'
+      var blob = makeZip(entries)
+      triggerDownload(blob, name + '-mockup.bmc')
+      $('mkStatus').textContent = 'Exported ' + name + '-mockup.bmc (' + Math.round(blob.size / 1024) + ' KB) — mint it in PharLap.'
     }).catch(function (e) { $('mkStatus').textContent = 'Export failed: ' + e.message })
   }
 
