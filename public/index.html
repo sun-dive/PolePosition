@@ -431,6 +431,7 @@
       <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
         <button id="videoBuild" class="ai-btn" type="button">🎥 Make WebP loop</button>
         <span id="videoStatus" class="dim" style="font-size:12px"></span>
+        <button id="mkOpen" class="ghost" type="button" title="Compose a design onto a product mockup (mug, tee, tote…)">🖼️ Product mockup…</button>
       </div>
     </div>
   </div>
@@ -447,6 +448,49 @@
       <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
         <button id="bmcExport" class="ai-btn" type="button">📦 Export .bmc</button>
         <span id="bmcStatus" class="dim" style="font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="mockupModal" class="modal" hidden>
+    <div class="modal-box" style="max-width:980px; width:96vw">
+      <div class="modal-head"><b>🖼️ Product mockup</b><button id="mkClose" class="ghost" type="button">✕</button></div>
+      <p class="dim" style="font-size:12px; margin:0 0 12px">Compose a design onto a reusable prop (mug, tee, tote…). The composite is never baked — the export is the prop's images + a tiny recipe (prop + design + placement) for PharLap to mint. One prop drives thousands of covers.</p>
+      <div style="display:flex; gap:16px; flex-wrap:wrap">
+        <div style="flex:1 1 440px; min-width:280px">
+          <div id="mkStage" style="position:relative; background:#0b0e13; border:1px solid var(--line,#33373f); border-radius:8px; min-height:320px; display:grid; place-items:center; overflow:hidden">
+            <div id="mkEmpty" class="dim" style="font-size:13px; text-align:center; padding:44px 20px">Load a prop and a design to begin.<br>Drag on the canvas to reposition.</div>
+            <canvas id="mkCanvas" style="max-width:100%; touch-action:none; cursor:grab; display:block" hidden></canvas>
+          </div>
+        </div>
+        <div style="flex:0 0 300px; min-width:260px; display:flex; flex-direction:column; gap:8px">
+          <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap">
+            <label class="ghost" style="cursor:pointer">🖼️ Prop base…<input id="mkProp" type="file" accept="image/*" hidden></label>
+            <span id="mkPropName" class="dim" style="font-size:12px"></span>
+          </div>
+          <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap">
+            <label class="ghost" style="cursor:pointer">🎨 Design…<input id="mkDesign" type="file" accept="image/*" hidden></label>
+            <span id="mkDesignName" class="dim" style="font-size:12px"></span>
+          </div>
+          <details style="font-size:12px">
+            <summary class="dim" style="cursor:pointer">Optional prop maps — mask · shade · disp</summary>
+            <div style="margin-top:6px; display:flex; flex-direction:column; gap:5px">
+              <label class="ghost" style="cursor:pointer">🎭 Mask (printable area)<input id="mkMask" type="file" accept="image/*" hidden></label>
+              <label class="ghost" style="cursor:pointer">💡 Shade (lighting)<input id="mkShade" type="file" accept="image/*" hidden></label>
+              <label class="ghost" style="cursor:pointer">〰️ Displacement (folds)<input id="mkDisp" type="file" accept="image/*" hidden></label>
+              <span id="mkMapsInfo" class="dim" style="font-size:11px"></span>
+            </div>
+          </details>
+          <div id="mkControls" style="display:flex; flex-direction:column; gap:9px; margin-top:2px"></div>
+          <div class="row" style="gap:6px; align-items:center; margin-top:4px">
+            <input id="mkName" class="title-in" style="flex:1; margin:0" placeholder="prop name — e.g. white-mug-11oz">
+          </div>
+          <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap">
+            <button id="mkExport" class="ai-btn" type="button" disabled>📦 Export mockup bundle</button>
+            <button id="mkReset" class="ghost" type="button">↺ Reset</button>
+            <span id="mkStatus" class="dim" style="font-size:12px"></span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -677,5 +721,7 @@
 
   <script src="editor.bundle.js"></script>
   <script src="app.js"></script>
+  <script src="mockup-render.js"></script>
+  <script src="mockup-author.js"></script>
 </body>
 </html>

@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mockup Compositor — proof of concept</title>
+<style>
+  :root {
+    --ground: #14161b;
+    --panel: #1c2029;
+    --panel-2: #232834;
+    --line: #2e3542;
+    --text: #e7eaf0;
+    --muted: #8b93a3;
+    --accent: #ff7518;      /* the ecosystem CTA ember — same as Big Red / TeeStrip */
+    --accent-dim: #b8560f;
+    --good: #3fb950;
+    --radius: 10px;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--ground);
+    color: var(--text);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 22px 64px; }
+  header { margin-bottom: 22px; }
+  h1 { font-size: 21px; letter-spacing: -0.01em; margin: 0 0 4px; }
+  h1 .tag { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 14px; margin: 0; max-width: 62ch; }
+  .cols { display: grid; grid-template-columns: 1fr 320px; gap: 22px; align-items: start; }
+  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+
+  .stage-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+  .stage {
+    position: relative; display: grid; place-items: center;
+    min-height: 340px; border-radius: 8px;
+    background:
+      linear-gradient(45deg, #171a20 25%, transparent 25%, transparent 75%, #171a20 75%) 0 0 / 22px 22px,
+      linear-gradient(45deg, #171a20 25%, #1b1f27 25%, #1b1f27 75%, #171a20 75%) 11px 11px / 22px 22px,
+      #1b1f27;
+    overflow: hidden;
+  }
+  canvas { max-width: 100%; touch-action: none; cursor: grab; display: block; }
+  canvas.dragging { cursor: grabbing; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 20px; font-size: 14px; }
+  .empty b { color: var(--text); display: block; margin-bottom: 6px; font-weight: 600; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .panel + .panel { margin-top: 16px; }
+  .panel h2 { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+
+  .drop { border: 1px dashed var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: var(--panel-2); }
+  .drop label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .drop .name { font-size: 13px; color: var(--text); margin-top: 6px; word-break: break-all; }
+  input[type=file] { font: inherit; font-size: 12px; color: var(--muted); width: 100%; }
+  input[type=file]::file-selector-button {
+    font: inherit; font-size: 12px; background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; margin-right: 10px; cursor: pointer;
+  }
+  input[type=file]::file-selector-button:hover { border-color: var(--accent-dim); }
+
+  .ctl { margin-bottom: 14px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl .row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+  .ctl label { font-size: 13px; }
+  .ctl .val { font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .hint { font-size: 11.5px; color: var(--muted); margin: 3px 0 0; }
+
+  .btns { display: flex; gap: 8px; margin-top: 4px; }
+  button {
+    font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+    border-radius: 7px; padding: 9px 12px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--text); flex: 1;
+  }
+  button:hover { border-color: var(--accent-dim); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 600; }
+  button.primary:hover { background: #ff8a3d; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .note { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+  .note code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 11.5px; color: var(--text); }
+  .note b { color: var(--text); font-weight: 600; }
+  .note ul { margin: 8px 0 0; padding-left: 18px; }
+  .note li { margin: 0 0 6px; }
+  .pill { display: inline-block; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase;
+          color: var(--good); border: 1px solid #234b2b; background: #0f1f13; border-radius: 999px; padding: 2px 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Mockup Compositor <span class="tag">· proof of concept</span></h1>
+    <p class="sub">One reusable prop + one design → a product cover, composited in the browser. Nothing is baked to a file: the cover is a recipe (<code style="font-size:12px">prop + design + placement</code>). This POC proves the on-chain-native approach before it ports into Pole Position.</p>
+  </header>
+
+  <div class="cols">
+    <div class="stage-card">
+      <div class="stage" id="stage">
+        <div class="empty" id="empty">
+          <b>Load a prop and a design to begin</b>
+          Use a real blank-tee / mug render and an artwork PNG. Drag on the canvas to reposition.
+        </div>
+        <canvas id="canvas" hidden></canvas>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Inputs</h2>
+        <div class="drop">
+          <label for="propFile">Prop — blank product (tee, mug, tote…)</label>
+          <input type="file" id="propFile" accept="image/*" />
+          <div class="name" id="propName"></div>
+        </div>
+        <div class="drop">
+          <label for="designFile">Design — artwork (PNG with transparency is ideal)</label>
+          <input type="file" id="designFile" accept="image/*" />
+          <div class="name" id="designName"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Placement &amp; surface</h2>
+        <div class="ctl">
+          <div class="row"><label for="scale">Scale</label><span class="val" id="scaleVal">100%</span></div>
+          <input type="range" id="scale" min="15" max="220" value="100" />
+        </div>
+        <div class="ctl">
+          <div class="row"><label for="rot">Rotation</label><span class="val" id="rotVal">0°</span></div>
+          <input type="range" id="rot" min="-45" max="45" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="row"><label for="fabric">Fabric shading</label><span class="val" id="fabricVal">80%</span></div>
+          <input type="range" id="fabric" min="0" max="100" value="80" />
+          <p class="hint">Multiplies the garment's own shadows over the print — the trick that stops it looking like a flat sticker. 0% = sticker, 100% = sits in the cloth.</p>
+        </div>
+        <div class="ctl">
+          <div class="row"><label for="curve">Wrap curve</label><span class="val" id="curveVal">0%</span></div>
+          <input type="range" id="curve" min="0" max="100" value="0" />
+          <p class="hint">Bows the print around a cylinder — mugs, cans, bottles — compressing it toward the sides like a real wrap. For garments this curvature comes from the prop's fold map instead.</p>
+        </div>
+        <div class="ctl">
+          <div class="row"><label for="skewH">Skew horizontal</label><span class="val" id="skewHVal">0</span></div>
+          <input type="range" id="skewH" min="-60" max="60" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="row"><label for="skewV">Skew vertical</label><span class="val" id="skewVVal">0</span></div>
+          <input type="range" id="skewV" min="-60" max="60" value="0" />
+          <p class="hint">Shears the print to sit on an angled surface (a tilted screen, a slanted panel) — a parallelogram, edges stay parallel.</p>
+        </div>
+        <div class="ctl">
+          <div class="row"><label for="perspV">Perspective ↕ (top ⇄ bottom)</label><span class="val" id="perspVVal">0</span></div>
+          <input type="range" id="perspV" min="-80" max="80" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="row"><label for="perspH">Perspective ↔ (left ⇄ right)</label><span class="val" id="perspHVal">0</span></div>
+          <input type="range" id="perspH" min="-80" max="80" value="0" />
+          <p class="hint">Tapers one edge shorter than the opposite — a trapezoid, giving the illusion of depth (a plane receding away). This is the print-region quad's job in production.</p>
+        </div>
+        <div class="btns">
+          <button id="reset">Reset placement</button>
+          <button id="download" class="primary" disabled>Download cover</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>How this maps on-chain</h2>
+        <p class="note">
+          The composite you see is never stored. On chain you keep only:
+          <ul>
+            <li><span class="pill">reused</span> the <b>prop atom</b> — minted once as a <code>.bmc</code> of maps (base + displacement + shading + mask), shared across the whole catalogue.</li>
+            <li><span class="pill">1×</span> the <b>design</b> — as a <b>watermarked public preview</b> (the clean file stays encrypted).</li>
+            <li>a few hundred bytes of <b>manifest</b>: <code>{ prop, design, place }</code>.</li>
+          </ul>
+          One design → many covers (tee, mug, tote) from tiny manifests, not stored images.
+        </p>
+        <p class="note" style="margin-top:10px">
+          <b>Fidelity note:</b> shading (multiply) and cylindrical wrap (mugs, cans, bottles) are both procedural here. Irregular surfaces — a folded tee, a crumpled tote — instead warp through the prop's authored <b>displacement map</b> (an SVG <code>feDisplacementMap</code> pass) that ships inside the real <code>.bmc</code> prop atom. Same manifest, richer prop.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../public/mockup-render.js"></script>
+<script>
+  const { renderCover } = MockupRender; // shared compositor (docs/mockup-render.js)
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('canvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+
+  const state = {
+    prop: null, design: null,
+    x: 0, y: 0,           // design centre, in CSS px (stage coords)
+    scale: 1.0, rot: 0,   // rot in degrees
+    fabric: 0.8,
+    curve: 0,             // cylindrical wrap amount 0..1
+    skewX: 0, skewY: 0,   // affine shear (parallelogram)
+    perspV: 0, perspH: 0, // keystone taper (trapezoid — perspective depth)
+    stageW: 0, stageH: 0, // CSS px
+  };
+  ctx.imageSmoothingQuality = 'high';
+
+  function loadImage(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => { resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('could not load image')); };
+      img.src = url;
+    });
+  }
+
+  // The design's drawn size: scale=1 → the design's longest side spans ~45% of the stage width.
+  function designSize() {
+    if (!state.design) return { w: 0, h: 0 };
+    const base = state.stageW * 0.45 * state.scale;
+    const ar = state.design.naturalWidth / state.design.naturalHeight;
+    return ar >= 1 ? { w: base, h: base / ar } : { w: base * ar, h: base };
+  }
+
+  function fitStage() {
+    if (!state.prop) return;
+    const host = $('stage').clientWidth - 28; // padding
+    const w = Math.min(host, 620);
+    const h = w * state.prop.naturalHeight / state.prop.naturalWidth;
+    state.stageW = w; state.stageH = h;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+  }
+
+  // Render via the SHARED renderer (docs/mockup-render.js) — the same code Pole Position / Big Red / PHAR LAP
+  // use. This POC is now a thin UI over the production compositor: what you see here is the real code path.
+  function render(forExport) {
+    if (!state.prop) return;
+    const { w, h } = state.design ? designSize() : { w: 0, h: 0 };
+    renderCover(ctx, {
+      base: state.prop,
+      design: state.design,
+      maps: {}, // a real prop atom would supply mask / shade / disp here
+      stageW: state.stageW, stageH: state.stageH, dpr,
+      box: state.design ? { cx: state.x, cy: state.y, w, h, rot: state.rot, skewX: state.skewX, skewY: state.skewY } : null,
+      // Warp pipeline: keystone perspective first, then the cylinder wrap. One "Wrap curve" slider drives both
+      // the wrap angle (curve) and the border bow (bow ≈ 0.8·curve).
+      warp: state.design ? [
+        { t: 'persp', kx: state.perspH, ky: state.perspV },
+        { t: 'cyl', curve: state.curve, bow: 0.8 * state.curve, axis: 0 },
+      ] : [],
+      fabric: state.fabric,
+    });
+    if (!forExport && state.design) {
+      // Selection outline (screen only). renderCover leaves the ctx dpr-scaled, so CSS-px coords are correct.
+      ctx.save();
+      ctx.translate(state.x, state.y);
+      ctx.rotate(state.rot * Math.PI / 180);
+      if (state.skewX || state.skewY) ctx.transform(1, state.skewY, state.skewX, 1, 0, 0);
+      ctx.strokeStyle = 'rgba(255,117,24,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(-w / 2, -h / 2, w, h);
+      ctx.restore();
+      ctx.setLineDash([]);
+    }
+  }
+
+  function showStage() {
+    $('empty').hidden = true;
+    canvas.hidden = false;
+    $('download').disabled = !(state.prop && state.design);
+  }
+
+  async function onProp(file) {
+    if (!file) return;
+    state.prop = await loadImage(file);
+    $('propName').textContent = file.name;
+    fitStage();
+    if (state.x === 0 && state.y === 0) { state.x = state.stageW / 2; state.y = state.stageH / 2; }
+    showStage(); render();
+  }
+
+  async function onDesign(file) {
+    if (!file) return;
+    state.design = await loadImage(file);
+    $('designName').textContent = file.name;
+    if (state.prop) { state.x = state.stageW / 2; state.y = state.stageH / 2; }
+    showStage(); render();
+  }
+
+  $('propFile').addEventListener('change', (e) => onProp(e.target.files[0]));
+  $('designFile').addEventListener('change', (e) => onDesign(e.target.files[0]));
+
+  function bindRange(id, valId, fmt, apply) {
+    const el = $(id);
+    el.addEventListener('input', () => {
+      apply(parseFloat(el.value));
+      $(valId).textContent = fmt(parseFloat(el.value));
+      render();
+    });
+  }
+  bindRange('scale', 'scaleVal', (v) => v + '%', (v) => state.scale = v / 100);
+  bindRange('rot', 'rotVal', (v) => v + '°', (v) => state.rot = v);
+  bindRange('fabric', 'fabricVal', (v) => v + '%', (v) => state.fabric = v / 100);
+  bindRange('curve', 'curveVal', (v) => v + '%', (v) => state.curve = v / 100);
+  bindRange('skewH', 'skewHVal', (v) => String(v), (v) => state.skewX = v / 100);
+  bindRange('skewV', 'skewVVal', (v) => String(v), (v) => state.skewY = v / 100);
+  bindRange('perspV', 'perspVVal', (v) => String(v), (v) => state.perspV = v / 100);
+  bindRange('perspH', 'perspHVal', (v) => String(v), (v) => state.perspH = v / 100);
+
+  $('reset').addEventListener('click', () => {
+    state.scale = 1; state.rot = 0; state.skewX = 0; state.skewY = 0; state.perspV = 0; state.perspH = 0;
+    state.x = state.stageW / 2; state.y = state.stageH / 2;
+    $('scale').value = 100; $('scaleVal').textContent = '100%';
+    $('rot').value = 0; $('rotVal').textContent = '0°';
+    $('skewH').value = 0; $('skewHVal').textContent = '0';
+    $('skewV').value = 0; $('skewVVal').textContent = '0';
+    $('perspV').value = 0; $('perspVVal').textContent = '0';
+    $('perspH').value = 0; $('perspHVal').textContent = '0';
+    render();
+  });
+
+  $('download').addEventListener('click', () => {
+    render(true);
+    const a = document.createElement('a');
+    a.download = 'mockup.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    render(false);
+  });
+
+  // Drag to reposition (axis-aligned hit test; good enough for a POC).
+  let dragging = false, grabDX = 0, grabDY = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!state.design) return;
+    const { w, h } = designSize();
+    const dx = e.offsetX - state.x, dy = e.offsetY - state.y;
+    if (Math.abs(dx) <= w / 2 + 12 && Math.abs(dy) <= h / 2 + 12) {
+      dragging = true; grabDX = dx; grabDY = dy;
+      canvas.classList.add('dragging');
+      canvas.setPointerCapture(e.pointerId);
+    }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    state.x = Math.max(0, Math.min(state.stageW, e.offsetX - grabDX));
+    state.y = Math.max(0, Math.min(state.stageH, e.offsetY - grabDY));
+    render();
+  });
+  const endDrag = () => { dragging = false; canvas.classList.remove('dragging'); };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+
+  window.addEventListener('resize', () => { if (state.prop) { const cx = state.x / (state.stageW || 1), cy = state.y / (state.stageH || 1); fitStage(); state.x = cx * state.stageW; state.y = cy * state.stageH; render(); } });
+</script>
+</body>
+</html>
