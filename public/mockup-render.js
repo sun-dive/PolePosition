@@ -218,4 +218,4 @@
   const api = { renderCover, warpDesign }
   global.MockupRender = api
   if (typeof module !== 'undefined' && module.exports) module.exports = api
-})(typeof window !== 'undefined' ? window : this)
+})(typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : this)
