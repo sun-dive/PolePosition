@@ -27,5 +27,7 @@ public/art/
 # private planning docs
 PLAN.md
 UI_PLAN.md
+docs/TEESTRIP-PLAN.md
+docs/SCENE-ENGINE-PLAN.md
 workshop-starter.json
 main-book-starter.json
