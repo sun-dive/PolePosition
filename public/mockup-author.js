@@ -143,10 +143,11 @@
   canvas.addEventListener('pointerup', endDrag)
   canvas.addEventListener('pointercancel', endDrag)
 
-  // Props display at a few hundred px on a cover, so 2048² source is ~4× waste. Downscale on export (resample —
-  // keeps the whole subject, unlike a crop) then WebP-encode → a big on-chain saving, imperceptible at cover size.
+  // Props/maps display at a few hundred px on a cover, so a 2048² source is ~4× waste. Downscale them on export
+  // (resample — keeps the whole subject, unlike a crop) then WebP-encode → a big on-chain saving, imperceptible at
+  // cover size. NOTE: the DESIGN is exempt — it's the sellable product a buyer PRINTS, so it's preserved full-res
+  // + original format (see exportBundle). Only base + maps go through this.
   var PROP_MAX = 1024   // base + maps
-  var DESIGN_MAX = 1280 // the focal artwork gets a touch more detail
   function toWebpScaled(file, maxDim, quality) {
     quality = quality == null ? 0.9 : quality
     return createImageBitmap(file).then(function (bmp) {
@@ -165,15 +166,28 @@
     })
   }
 
-  // Export the (downscaled) prop images + a readable recipe, in one store-only .bmc bundle for PharLap to mint.
+  // Read a file's bytes VERBATIM (no re-encode) — used for the design, kept at full PoD resolution + original
+  // format (a PNG stays lossless with alpha). Extension/mime come from the uploaded file.
+  function rawBytes(file) { return file.arrayBuffer().then(function (ab) { return new Uint8Array(ab) }) }
+  function designExt(file) {
+    var m = /\.([a-z0-9]+)$/i.exec(file.name || '')
+    if (m) return m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase()
+    var t = (file.type || '').split('/')[1] || 'png'
+    return t === 'jpeg' ? 'jpg' : t
+  }
+
+  // Export the prop images (downscaled) + the FULL-RES design + a readable recipe, in one store-only .bmc bundle.
   function exportBundle() {
     if (!(st.base && st.design)) return
     var name = ($('mkName').value.trim() || 'mockup').replace(/[^a-z0-9._-]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'mockup'
     $('mkStatus').textContent = 'Packing…'
+    var dExt = designExt(st.designFile)
+    var dName = 'design.' + dExt
+    var dMime = st.designFile.type || ('image/' + (dExt === 'jpg' ? 'jpeg' : dExt))
     var entries = [], roles = { base: 'base.webp' }
     var jobs = [
       toWebpScaled(st.baseFile, PROP_MAX).then(function (b) { entries.push({ name: 'base.webp', bytes: b }) }),
-      toWebpScaled(st.designFile, DESIGN_MAX).then(function (b) { entries.push({ name: 'design.webp', bytes: b }) }),
+      rawBytes(st.designFile).then(function (b) { entries.push({ name: dName, bytes: b }) }), // sellable master — full res, original format
     ]
     ;['mask', 'shade', 'disp'].forEach(function (k) {
       if (st.mapFiles[k]) jobs.push(toWebpScaled(st.mapFiles[k], PROP_MAX).then(function (b) { entries.push({ name: k + '.webp', bytes: b }); roles[k] = k + '.webp' }))
@@ -183,14 +197,16 @@
       var recipe = {
         v: 1,
         prop: { name: name, roles: roles, warp: [{ t: 'persp', kx: st.perspH, ky: st.perspV }, { t: 'cyl', curve: st.curve, bow: 0.8 * st.curve, axis: 0 }] },
-        design: 'design.webp',
+        design: dName,
+        designMime: dMime,
         place: { cx: st.x / st.stageW, cy: st.y / st.stageH, w: s.w / st.stageW, h: s.h / st.stageH, rot: st.rot, skewX: st.skewX, skewY: st.skewY },
         fabric: st.fabric,
       }
       entries.push({ name: 'mockup.json', bytes: new TextEncoder().encode(JSON.stringify(recipe, null, 2)) })
       var blob = makeZip(entries)
+      var dKB = Math.round((entries.find(function (e) { return e.name === dName }) || { bytes: [] }).bytes.length / 1024)
       triggerDownload(blob, name + '-mockup.bmc')
-      $('mkStatus').textContent = 'Exported ' + name + '-mockup.bmc (' + Math.round(blob.size / 1024) + ' KB) — mint it in PharLap.'
+      $('mkStatus').textContent = 'Exported ' + name + '-mockup.bmc (' + Math.round(blob.size / 1024) + ' KB · design ' + dExt.toUpperCase() + ' ' + dKB + ' KB full-res) — mint it in PharLap.'
     }).catch(function (e) { $('mkStatus').textContent = 'Export failed: ' + e.message })
   }
 
