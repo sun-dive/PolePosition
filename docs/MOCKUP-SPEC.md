@@ -1,73 +1,76 @@
 # Mockup Prop Atoms & Cover Manifests
 
-*Draft v0.1 — a BMF-family format for composing product covers on-chain. See [BMF-SPEC.md](BMF-SPEC.md).*
+*Draft v0.2 — a BMF-family format for composing product covers on-chain. See [BMF-SPEC.md](BMF-SPEC.md).*
 
-A product cover (a design shown on a tee, mug, tote, poster…) is not stored as a baked image. It is a
-**recipe**: a reusable **prop atom** + a **design** + a few placement numbers, composited in the browser. Same
-"reference, don't embed" spine as BMF — a mug photo is minted once and drives thousands of covers.
-
-Three pieces:
+A product cover (a design shown on a tee, mug, tote, poster…) is not stored as a baked image. It is composited
+from reusable parts: a **prop atom** that owns all the geometry, and a **design** that is just a plain image. Same
+"reference, don't embed" spine as BMF — one prop photo is minted once and drives thousands of covers, and one
+design drops onto every prop of its shape. **Reuse is the whole point: do not store the design×prop combinations.**
 
 | Piece | What | On-chain form |
 |---|---|---|
-| **Prop atom** | the blank product + its surface maps | a `.bmc` (ZIP), minted once, shared |
-| **Design** | the artwork — the **watermarked public preview** (the clean file stays encrypted) | an atom (txid) |
-| **Cover manifest** | the recipe binding prop + design + placement | a **packed byte record** (≈66–90 B) |
+| **Prop atom** | the blank product + its surface maps **+ its own manifest** (geometry, socket ratio, fabric) | a base image FILE + a packed `RECORD_MOCKUP` **prop manifest** (§5), minted once, shared |
+| **Design** | the artwork — a plain image, classified by its pixel dimensions into a **socket ratio** (§2) | an atom; the sellable clean file may be encrypted, the public **preview** is what's shown |
+| **Product cover** | a tiny **pointer** to the prop (design = the product's own preview), or a one-off full cover | a packed `RECORD_MOCKUP` **cover** record (§5), ~35 B pointer |
 
-The clean product is never referenced by a public cover — only the watermarked preview is (see Phase 3 security).
+The prop carries the geometry; the design carries none. A design composites onto a prop **only when their socket
+ratios match** — that match is the entire reuse contract.
 
 ---
 
-## 1. Geometry model — two stages
+## 1. Roles across the trifecta
+
+Compositing is **browser-side**; the server never bakes a design onto a prop.
+
+- **Pole Position** (create) — authors a prop `.bmc` (base + maps + descriptor) and designs.
+- **Phar Lap** (mint) — mints the prop atom (carrying its manifest) and the product (a pointer to the prop). The
+  reusable codec + mint fns live in the shared `src/` core (`mockup.ts`, `mockupIngest.ts`).
+- **Big Red** (sell/display) — the **curator** (Node, runs on Big Red's host) resolves chain → caches sample
+  images + a `props.json` index; the **browser** (`app.js` + `mockup-render.js`) composites design × prop live.
+
+---
+
+## 2. Socket ratios (the reuse contract)
+
+A design is a plain image. Its **pixel dimensions classify it** into one of five canonical ratios (frozen ids —
+the index is the on-chain socket id); a prop declares the ratio it accepts. `ratioOf(w,h)` picks the nearest by
+log-aspect (so 3:4 ≈ 4:5). Fewer ratios = one design reuses across more props.
+
+| id | ratio | typical products |
+|---|---|---|
+| 0 | `1:1`  | tote, sticker, mug (centred), matted poster, phone (centred) |
+| 1 | `4:5`  | apparel fronts, posters |
+| 2 | `2:3`  | tall art prints, posters |
+| 3 | `16:9` | banners, laptop skins, mug wraps |
+| 4 | `9:16` | phone cases, story format |
+
+"The main image dimensions determine what props it can be displayed with." The browser offers every prop whose
+`ratio` matches the design's — that is the mix-and-match.
+
+---
+
+## 3. Geometry model — two stages
 
 Keeping these separate is what makes one small warp registry cover mugs, shirts and angled flats:
 
 1. **Surface warp** (design-local): shapes the flat design to the *surface* — a mug's curve, a shirt's folds —
-   in a plain rectangle. An ordered, extensible **warp pipeline** (§3).
-2. **Quad placement** (onto the base): maps that warped rectangle onto a 4-corner **print region** on the base
-   photo — this alone carries position, scale, rotation *and* planar perspective (an angled product).
+   in a plain rectangle. An ordered, extensible **warp pipeline** (§4).
+2. **Print placement** (onto the base): a centre/scale/rotation/skew **box** (or a 4-corner **quad** for planar
+   perspective) positioning the warped rectangle on the base photo.
 
-Then **mask** (clip to the printable area) and **shading** (multiply the prop's own light over the design).
+Then **mask** (clip to the printable area) and **shading** (multiply the prop's own light over the design at the
+prop's `fabric` strength).
 
 ```
-design → [warp pipeline] → [print-region quad] → [mask] → [× shading] → cover
+design → [warp pipeline] → [place box / quad] → [mask] → [× shading] → cover
 ```
+
+All of this — warp, place, mask/shade refs, fabric, socket ratio — lives in the **prop's** manifest. The design is
+a bare rectangle that fills the box (its height derived from its own aspect at render time).
 
 ---
 
-## 2. Prop atom (`.bmc`)
-
-A ZIP bundling the surface maps plus a small `prop` descriptor. Members are WebP (lossless where it matters);
-the images dominate the atom's size, so they carry the byte budget — keep them tight (VFR/partial-frame WebP,
-lossless centre-crop; see the project's on-chain-quality rules).
-
-**Members (roles):**
-
-| Role | Req. | What |
-|---|---|---|
-| `base` | ✔ | the blank product photo (shown behind/around the print) |
-| `mask` | ○ | grayscale printable region (white = printable). Clips overflow. |
-| `shade` | ○ | the multiply light/shadow map. If absent, derive from `base`. |
-| `disp` | ○ | grayscale displacement map — only for `displace` warp (folds) |
-
-**Descriptor** (`prop.json` while authoring; packed on-chain per §5):
-
-```json
-{
-  "v": 1,
-  "print": [[0.30,0.34],[0.66,0.34],[0.66,0.72],[0.30,0.72]],   // print-region quad, normalized base coords
-  "warp":  [ { "t": "cyl", "curve": 0.62, "bow": 0.16 } ],       // default warp pipeline (§3)
-  "roles": { "base": "mug.webp", "shade": "mug-shade.webp", "mask": "mug-mask.webp" },
-  "meta":  { "name": "white-mug-11oz", "wmm": 200, "hmm": 93 }    // human label + print size (optional)
-}
-```
-
-A prop declares its own default warp: a mug says `cyl`; a tee carries a `disp` map. Covers inherit it and rarely
-override.
-
----
-
-## 3. Warp pipeline (extensible)
+## 4. Warp pipeline (extensible)
 
 `warp` is an **ordered array** of stages applied to the design in local space. New surfaces = new stage types;
 nothing else changes. Empty array = flat. Stages compose (a tee can be `disp` *then* a gentle `cyl` for the body).
@@ -80,143 +83,168 @@ implementation, present or future, agrees on the numbering. `●` = implemented 
 | 0 | `flat` | posters, stickers, flat-lay, labels | ● | — |
 | 1 | `cyl` | mugs, cans, bottles, candles, tins | ● | `curve` 0–1→`u8/255` · `bow` −1..1→`i8/127` (sign=smile/frown) · `axis` `u8` 0=vert 1=horiz |
 | 2 | `disp` | **t-shirts**, totes, hoodies, fabric, crumpled paper | ● | `str` 0–64px→`u8·0.25` · `map` `u8` role-id (default `disp`) |
-| 3 | `persp` | angled planar skew beyond the print quad | ○ | `kx` `ky` −1..1→`i8/127` |
+| 3 | `persp` | angled planar skew beyond the print quad | ● | `kx` `ky` −1..1→`i8/127` |
 | 4 | `bulge` | pillows, balloons, badges, buttons, cushions | ○ | `amt` −1..1→`i8/127` (barrel/pincushion) |
 | 5 | `sphere` | balls, globes, ornaments, domes, lenses | ○ | `curve` 0–1→`u8/255` |
-| 6 | `cone` | tapered tumblers, lampshades, cups, buckets | ○ | `taper` 0–1→`u8/255` (top/bottom radius) · `curve` `u8/255` |
-| 7 | `mesh` | arbitrary freeform surfaces (scanned props) | ○ | `cols` `u8` · `rows` `u8` · then cols×rows offsets (`i8`,`i8`), or `map` role-id |
-| 8 | `ripple` | water, reflective surfaces, concentric | ○ | `amp` `u8` · `freq` `u8` · `phase` `u8` · `axis` `u8` |
+| 6 | `cone` | tapered tumblers, lampshades, cups, buckets | ○ | `taper` 0–1→`u8/255` · `curve` `u8/255` |
+| 7 | `mesh` | arbitrary freeform surfaces (scanned props) | ○ | `cols` `u8` · `rows` `u8` · then offsets, or `map` role-id (variable → `raw`) |
+| 8 | `ripple` | water, reflective surfaces, concentric | ○ | `amp` · `freq` · `phase` · `axis` (all `u8`) |
 | 9 | `wave` | hanging fabric, flags, banners, curtains | ○ | `amp` `u8` · `len` `u8` · `angle` `u8` (0–360) |
 | 10 | `curl` | page/sticker curl, peeling corner | ○ | `amt` `u8` · `corner` `u8` (0–3 TL/TR/BR/BL) |
-| 11 | `emboss` | engraving, letterpress, deboss, relief | ○ | `depth` −1..1→`i8/127` (uses `disp`/normal member) |
-| 12 | `fold` | folded posters, maps, greeting cards | ○ | `n` `u8` lines, then per line: `angle` `u8` · `pos` `u8` · `sharp` `u8` |
-| 13 | `skew` | quick affine shear | ○ | `sx` `sy` −1..1→`i8/127` |
-| 14 | — | *reserved* (unused id kept open) | — | — |
-| 15 | `ext` | escape hatch for anything beyond the table | — | `len` `u8`, then `len` raw param bytes |
+| 11 | `emboss` | engraving, letterpress, deboss, relief | ○ | `depth` −1..1→`i8/127` |
+| 12 | `fold` | folded posters, maps, greeting cards | ○ | variable → `raw` |
+| 13 | `skew` | quick affine shear | ● | `sx` `sy` −1..1→`i8/127` |
+| 14 | — | *reserved* | — | — |
+| 15 | `ext` | escape hatch for anything beyond the table | — | `raw` param bytes |
 
-*T-shirts* are the `disp` case: the prop's `disp` map (fabric folds) drives an SVG `feDisplacementMap` warp,
-optionally chained with a low-`curve` `cyl` for torso roundness. Mugs are `cyl` alone (procedural, no map needed —
-validated in the POC). A renderer that meets an id it doesn't implement **skips that stage** (graceful degrade:
-the design still composites, just less conformed) — so shipping `flat`/`cyl`/`disp` first is forward-compatible.
+Each stage packs as `[type:u8, plen:u8, plen×param bytes]`. A renderer that meets an id it doesn't implement
+**skips that stage** by its `plen` (graceful degrade); variable/unknown types round-trip via raw bytes.
 
 ---
 
-## 4. Cover manifest
+## 5. Packed on-chain encoding
 
-The per-product recipe. Authoring JSON uses shorthand keys; the on-chain form is packed (§5).
+Two record types share the `RECORD_MOCKUP` PushDrop output, distinguished by their leading TAG byte:
 
-```json
-{ "v":1,
-  "p":"<prop atom txid>",          // prop
-  "d":"<design preview txid>",     // design (WATERMARKED preview, never the clean product)
-  "P":[0.50,0.50,1.00,0],          // place: x, y, scale, rot° — relative to the print region; omit = fill region
-  "w":[{"t":"cyl","curve":0.62}]   // OPTIONAL warp override/tweak; omit = inherit the prop's warp
-}
-```
+- **`0x50` 'P' — PROP manifest** (rides the PROP mint): the self-describing geometry (§5.1).
+- **`0x4D` 'M' — COVER** (rides the PRODUCT mint): a pointer to a prop, or a one-off full cover (§5.2).
 
-`p` and `d` may instead be a small **set index** (`u16`) when the prop/design live in the same `.bmc` set as the
-cover — avoids repeating a 32-byte txid (see flags, §5).
+### 5.1 Prop manifest — TLV blocks (extensible)
 
----
-
-## 5. Packed on-chain encoding (primary form)
-
-Little-endian. The two txid refs dominate; everything else quantizes to ≤2 bytes. Defaults are **omitted** via
-flags, so the common cover (design fills the region, prop's own warp) is just header + two refs.
+A stream of tagged blocks so new parameters never break old parsers (a t-shirt contour map, fold lines, light
+direction… all slot in as new ids). A parser reads the ids it knows and **skips any unknown id by its length**,
+preserving it verbatim for a lossless round-trip.
 
 ```
 off  size  field
-0    1     TAG        0x4D ('M')  — mockup cover record
-1    1     VERFLAGS   high nibble = version (1); low nibble = flags:
-                        bit0 place present      (else: design fills the print region)
-                        bit1 warp override present (else: inherit prop default)
-                        bit2 prop is set-index (u16)   (else: 32-byte txid)
-                        bit3 design is set-index (u16) (else: 32-byte txid)
-2    32|2  PROP       txid (32)  or  set index (u16)
-..   32|2  DESIGN     txid (32)  or  set index (u16)
-                    — the following blocks appear only if their flag is set —
-[place]  7  x:u16  y:u16  scale:u16(/1024 → 0..64)  rot:u8(/255 → 0..360°)
-[warp]   1+ count:u8, then per stage:  type:u8, plen:u8, plen×param bytes (quantized per §3)
+0    1     TAG        0x50 ('P')
+1    1     version    bump only for INCOMPATIBLE changes; new fields are additive (no bump)
+2..  —     blocks, each:  id:u8  len:u8 (0xFF → u16 follows)  value[len]
 ```
 
-**Sizes.** Minimal (two txids, defaults): **66 B**. Mug with a per-cover curve tweak
-(`place` off, `warp` = 1 stage × 1 param): **66 + 3 = 69 B**. Fully specified (place + 1 warp stage, 2 params):
-**66 + 7 + 4 = 77 B**. Set-indexed refs (prop+design in the same set): **~10 B + params**.
+**Field-id registry** (frozen, additive; `0x0B–0xFE` reserved for future params):
 
-The prop descriptor packs the same way (`print` quad = 8×`u16`; `warp` = the block above; `roles` = a role→member
-bitmap + indices), but it rides inside the `.bmc` where the map images set the budget, so packing it is for
-consistency, not savings.
+| id | field | value |
+|---|---|---|
+| 0x01 | `RATIO` | `u8` socket id (§2) |
+| 0x02 | `FABRIC` | `u8` ×255 — shading strength 0..1 |
+| 0x03 | `PLACE` | 9 B print box: `x:u16` `y:u16` (÷65535) · `scale:u16` (÷1024) · `rot:u8` (÷255→360°) · `skewX:i8` `skewY:i8` (÷127) |
+| 0x04 | `WARP` | the warp pipeline (§4): `count:u8` then stages |
+| 0x05 | `QUAD` | 16 B — 4 corners `x:u16 y:u16` (÷65535); planar-perspective alt/added to PLACE |
+| 0x06 | `DISP` | 33 B — displacement/contour map atom `txid(32)` + `str:u8` (÷255). The t-shirt fabric contour. |
+| 0x07 | `MASK` | 32 B — print-area cutout atom `txid` |
+| 0x08 | `SHADE` | 32 B — baked shade/AO atom `txid` |
+| 0x09 | `DIMS` | 4 B — physical print size `wmm:u16 hmm:u16` |
+| 0x0A | `NAME` | UTF-8 label |
 
-### 5.1 Compression — compress-if-smaller, raw for hashes
+Height is **not** stored — the design's own aspect gives the box height at render (only PLACE `scale` = width).
+Minimal prop (RATIO + FABRIC) ≈ 8 B; a real tee (ratio, fabric, place, 2-stage warp, name) ≈ 40 B.
 
-DEFLATE/gzip shrinks *redundancy*; it does nothing for high-entropy bytes. Apply it only where it actually pays:
+### 5.2 Cover record (`0x4D`)
 
-- **The cover manifest stays raw.** It is almost entirely two 32-byte txids — SHA-256 hashes, i.e. near-random
-  bytes that do not compress. Gzip's ~18-byte header/footer would make a 66-byte record *larger*. Compressing a
-  single manifest is a net loss.
-- **Content / design payloads → gzip pays.** Text and uncompressed data compress well (SVphone saw ~50%). The
-  stack already captures this: `compressIfSmaller` + `RESTRICTION_COMPRESSED` tries DEFLATE and keeps it **only if
-  it shrank**, before encrypting. That conditional rule is the correct universal policy — it gzips text and
-  *declines* on hashes and already-compressed data automatically.
-- **Prop map images are already WebP** (compressed) → gzip adds ≈0.
-- **Batches**: a `.bmc` holding many covers that share a prop *does* repeat the 32-byte prop txid — real
-  redundancy — but the format already removes it structurally with `u16` **set-index refs**, which beats gzip (no
-  header, and it also shrinks the uncompressed form). Gzip the whole bundle only as a last-resort, still
-  compress-if-smaller.
+The product's cover. **Pointer form** (the norm): prop ref + design *embedded* (the design IS the product's own
+storefront preview) + no geometry → **~35 B**; geometry is inherited from the prop's manifest. **Full one-off
+form**: carries its own design ref + place + warp, self-contained, for a bespoke single that doesn't reuse a prop.
 
-**Rule:** *compress-if-smaller everywhere, raw for hashes* — never pay DEFLATE overhead on data that won't shrink.
+```
+0    1     TAG        0x4D ('M')
+1    1     VERSION
+2    1     FLAGS      bit0 place · bit1 warp · bit2 prop set-index · bit3 design set-index · bit4 design embedded
+3    32|2  PROP       txid (32) or set-index (u16)
+..   32|2  DESIGN     present only if NOT embedded — txid (32) or set-index (u16)
+[place] 10 x:u16 y:u16 scale:u16 rot:u8 skewX:i8 skewY:i8 fabric:u8   (one-off only)
+[warp]  1+ the warp block (one-off only)
+```
+
+Pointer (embedded design, prop txid, no place/warp) = TAG+VER+FLAGS+32 = **35 B**.
+
+### 5.3 Compression — compress-if-smaller, raw for hashes
+
+DEFLATE/gzip shrinks *redundancy*; it does nothing for high-entropy bytes. Apply it only where it pays:
+
+- **The manifest/cover records stay raw** — dominated by 32-byte txids (SHA-256, near-random). Gzip's ~18-byte
+  header would make a 35–40 B record *larger*.
+- **Content/design payloads → gzip pays** — captured by `compressIfSmaller` + `RESTRICTION_COMPRESSED` (tries
+  DEFLATE, keeps it **only if it shrank**, before encrypting). The curator inflates a gzip'd prop base before use.
+- **Prop map images are already WebP** → gzip adds ≈0.
+
+**Rule:** *compress-if-smaller everywhere, raw for hashes.*
 
 ---
 
-## 6. Rendering pipeline (the compositor)
+## 6. Rendering & delivery
 
-Deterministic; matches the POC's order (offscreen warp, single composite):
+**Server does NOT composite.** (An earlier `@napi-rs/canvas` server render was removed — the 33 MB skia native
+module OOM-killed the memory-capped shared-host cron and couldn't decode the images.) Two roles instead:
 
-1. Fetch `prop` (`base`,`mask?`,`shade?`,`disp?`) and the `design` preview.
-2. Warp the design on an **offscreen canvas** through the pipeline (§3). One canvas, composited once — never draw
-   warped slices straight under `multiply` (double-darkens seams → stripes).
-3. Project the offscreen onto the base via the **print-region quad** (affine, or triangle-split for perspective).
-4. Clip to `mask` (if present).
-5. Composite over `base` with **multiply** at the shading strength (from `shade`, or the base region).
+**Curator (Node, on Big Red's host)** — per mockup listing, using **ImageMagick → GraphicsMagick → PHP-Imagick →
+PHP-GD** (whichever the host has; all run as cheap separate processes), from the design preview into a transient
+temp file (never served), emit two WebP:
+- **watermarked** low-res (`covers/<id>.webp`, domain overlay) → crawlers, bots, `og:image`;
+- **clean** low-res (`covers/<id>-clean.webp`) → the browser's compositing source.
 
-Cylinder warp is procedural (canvas column-slice: horizontal `sin()` foreshorten + vertical border-bow).
-Displacement warp is an SVG `feDisplacementMap` pass using the prop's `disp` map.
+It also caches each prop's base image → `props/<txid>.webp`, and writes **`props.json`** (every self-describing
+prop: base + ratio + geometry) so the browser can offer all props of a design's ratio. Each mockup listing carries
+`mockup:{ clean, prop, base, ratio, place, warp, fabric }`.
+
+**Browser (Big Red `app.js` + `mockup-render.js`)** — composites, deterministically (offscreen warp, single
+composite — never draw warped slices straight under `multiply`; that double-darkens seams into stripes):
+1. Load the clean design + prop base.
+2. Warp the design offscreen through the pipeline (§4). `cyl` is procedural (column-slice: `sin()` foreshorten +
+   border-bow); `disp` uses the prop's `disp` map; `persp` is a keystone taper (cap edge scale ≤1); supersample ×2
+   to anti-alias the slice staircase.
+3. Place onto the base via the box (or quad), clip to `mask` if present.
+4. Composite over the base with **multiply** at `fabric` (or a `shade` map).
+5. A **prop switcher** (props of the matching ratio, from `props.json`) re-composites live = mix-and-match.
+
+Failure at any step degrades to the flat watermarked cover.
 
 ---
 
 ## 7. On-chain integration
 
-- **Cover slot.** A mockup cover rides in the existing storefront cover field: `coverMimeType =
-  application/vnd.bmf-mockup`, `coverBytes` = the packed record (§5). A client that sees this mime **composites**;
-  one that doesn't falls back (below). No new token field.
-- **Fallback / cache.** Also cache a **rendered** cover image (render-once, serve-many — the on-chain-data-delivery
-  model): crawlers, `<meta og:image>`, and old clients get a flat PNG/WebP; the on-chain truth stays the tiny
-  manifest. Big Red's catalog cache is the natural host.
-- **Security.** `d` MUST reference the **watermarked public preview**, never the encrypted product atom. The cover
-  is marketing; the clean file is delivered on purchase.
-- **Immutability.** Minted into TX1, the cover manifest is sealed by the collection txid like every other template
-  field — the prop/design/placement a buyer sees can't be swapped after mint.
+- **Records.** Prop mint emits a `RECORD_MOCKUP` output = `packProp(manifest)` (`0x50`). Product mint emits a
+  `RECORD_MOCKUP` output = the cover pointer `packCover({prop, design:embedded})` (`0x4D`) alongside its normal
+  storefront cover (the public design preview) + encrypted clean FILE.
+- **Security.** A public cover/preview MUST be the **watermarked/degraded** image, never the encrypted clean
+  product. On a public chain plaintext-on-chain is free to read — so the protection is: encrypted clean file +
+  low-res watermarked preview + the compositor's own distortion. Ownership/licence/resale/provenance are the
+  product, not the pixels.
+- **Immutability.** Both records are minted into TX1, sealed by the collection txid — prop geometry and the
+  product's prop pointer can't be swapped after mint. (A one-off full cover is likewise immutable.)
+- **Reuse.** A prop is minted once; every product that references it is a ~35 B pointer. Mint a new prop → the whole
+  catalogue of matching-ratio designs can render onto it, no re-mint of any design.
 
 ---
 
 ## 8. Examples
 
-**Mug** (procedural, no maps beyond base+shade):
-```json
-prop:  { "v":1, "print":[[.30,.34],[.66,.34],[.66,.72],[.30,.72]],
-         "warp":[{"t":"cyl","curve":0.62,"bow":0.16}], "roles":{"base":"mug.webp","shade":"mug-shade.webp"} }
-cover: { "v":1, "p":"<mug-prop tx>", "d":"<design preview tx>" }              // 66 B packed
+**Prop — white mug** (`1:1`, procedural cyl, base+shade):
+```jsonc
+// packProp →
+{ "ratio": 0, "fabric": 0.8,
+  "place": { "x":0.48,"y":0.5,"scale":0.36,"rot":0,"skewX":0,"skewY":0 },
+  "warp":  [ { "t":"cyl","curve":0.62,"bow":0.16 } ],
+  "shade": "<mug-shade atom tx>", "name": "white-mug-11oz" }         // ~45 B packed
 ```
 
-**T-shirt** (fold displacement + torso curve):
-```json
-prop:  { "v":1, "print":[[.34,.28],[.66,.28],[.66,.60],[.34,.60]],
-         "warp":[{"t":"disp","str":14},{"t":"cyl","curve":0.12}],
-         "roles":{"base":"tee.webp","shade":"tee-shade.webp","mask":"tee-mask.webp","disp":"tee-disp.webp"} }
-cover: { "v":1, "p":"<tee-prop tx>", "d":"<design preview tx>", "P":[0.50,0.46,0.9,0] }   // 73 B packed
+**Prop — t-shirt** (`4:5`, fold displacement + torso curve, contour map):
+```jsonc
+// packProp →
+{ "ratio": 1, "fabric": 0.83,
+  "place": { "x":0.5,"y":0.62,"scale":0.4,"rot":0,"skewX":0,"skewY":0 },
+  "warp":  [ { "t":"persp","kx":0.1,"ky":-0.05 }, { "t":"cyl","curve":0.12,"bow":0.1 } ],
+  "disp":  { "tx":"<tee-contour atom tx>", "str":0.5 },
+  "mask":  "<tee-mask atom tx>", "name": "unisex-tee-front" }
+```
+
+**Product cover — a design on that tee** (pointer; design = the product's own preview):
+```jsonc
+// packCover →  { prop:"<tee-prop tx>", design: <embedded> }          // 35 B packed
 ```
 
 ---
 
-*Status: draft for review. Next: fold `cyl` + `disp` into the compositor in Pole Position `public/`, define the
-`.bmc` prop packer/parser alongside the existing BMF codec.*
+*Status: draft v0.2 — matches the shipped codec (`PharLap/src/mockup.ts`: `packProp`/`parseProp`, `packCover`,
+`RATIOS`/`ratioOf`), curator samples (`imageSamples.ts`), and browser compositor (`BigRed/app.js` +
+`mockup-render.js`). Next: the prop switcher UI (props of the matching ratio) and more props to exercise it.*
