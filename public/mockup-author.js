@@ -15,7 +15,7 @@
     base: null, design: null, baseFile: null, designFile: null,
     maps: {}, mapFiles: {},
     x: 0, y: 0, scale: 1, rot: 0, fabric: 0.8, curve: 0, skewX: 0, skewY: 0, perspV: 0, perspH: 0,
-    stageW: 0, stageH: 0,
+    stageW: 0, stageH: 0, placed: false,
   }
 
   function loadImage(file) {
@@ -138,15 +138,15 @@
       var input = $('mk_' + s[0]), out = $('mk_' + s[0] + 'v')
       if (input) { input.value = s[4]; s[6](s[4]); out.textContent = s[5](s[4]) }
     })
-    st.x = st.stageW / 2; st.y = st.stageH / 2
+    st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = false
     render()
   }
 
   function onFile(kind, file) {
     if (!file) return
     loadImage(file).then(function (img) {
-      if (kind === 'base') { st.base = img; st.baseFile = file; $('mkPropName').textContent = file.name; fitStage(); st.x = st.stageW / 2; st.y = st.stageH / 2 }
-      else if (kind === 'design') { st.design = img; st.designFile = file; $('mkDesignName').textContent = file.name; if (st.base) { st.x = st.stageW / 2; st.y = st.stageH / 2 } }
+      if (kind === 'base') { st.base = img; st.baseFile = file; $('mkPropName').textContent = file.name; fitStage(); if (!st.placed) { st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = true } }
+      else if (kind === 'design') { st.design = img; st.designFile = file; $('mkDesignName').textContent = file.name; if (st.base && !st.placed) { st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = true } }
       else { st.maps[kind] = img; st.mapFiles[kind] = file; $('mkMapsInfo').textContent = 'loaded: ' + Object.keys(st.maps).join(', ') }
       showStage(); render()
     }).catch(function (e) { $('mkStatus').textContent = e.message })
@@ -204,6 +204,70 @@
     return t === 'jpeg' ? 'jpg' : t
   }
 
+  // Push current st.* geometry back into the slider UI (sliders hold display values = ×100 of the st fields).
+  function syncControls() {
+    buildSliders()
+    var disp = {
+      scale: st.scale * 100, rot: st.rot, fabric: st.fabric * 100, curve: st.curve * 100,
+      contour: st.contour, skewH: st.skewX * 100, skewV: st.skewY * 100, perspH: st.perspH * 100, perspV: st.perspV * 100,
+    }
+    SLIDERS.forEach(function (s) {
+      if (!(s[0] in disp)) return
+      var input = $('mk_' + s[0]), out = $('mk_' + s[0] + 'v')
+      if (!input) return
+      var v = Math.round(disp[s[0]] * 100) / 100
+      input.value = v; out.textContent = s[5](v)
+    })
+  }
+
+  // Reuse a prop: restore geometry + images from a .bmc, so a new colour/garment is just "swap the base photo → Export".
+  function importBundle(file) {
+    if (!file) return
+    $('mkStatus').textContent = 'Restoring…'
+    file.arrayBuffer().then(function (buf) {
+      var entries = unzip(new Uint8Array(buf)), byName = {}
+      entries.forEach(function (e) { byName[e.name] = e.bytes })
+      var recRaw = byName['mockup.json']
+      if (!recRaw) { $('mkStatus').textContent = 'Not a mockup .bmc (no mockup.json).'; return }
+      var rec = JSON.parse(new TextDecoder().decode(recRaw))
+      var roles = (rec.prop && rec.prop.roles) || {}
+      function toFile(name) { var b = byName[name]; return b ? new File([b], name, { type: mimeFromName(name) }) : null }
+      var baseName = roles.base || 'base.webp'
+      var baseFile = toFile(baseName), designFile = toFile(rec.design)
+      if (!baseFile || !designFile) { $('mkStatus').textContent = 'Bundle is missing its base or design image.'; return }
+      st.maps = {}; st.mapFiles = {}
+      var pend = [
+        loadImage(baseFile).then(function (im) { st.base = im; st.baseFile = baseFile; $('mkPropName').textContent = baseName }),
+        loadImage(designFile).then(function (im) { st.design = im; st.designFile = designFile; $('mkDesignName').textContent = rec.design }),
+      ]
+      ;['mask', 'shade', 'disp'].forEach(function (k) {
+        var f = roles[k] ? toFile(roles[k]) : null
+        if (f) pend.push(loadImage(f).then(function (im) { st.maps[k] = im; st.mapFiles[k] = f }))
+      })
+      Promise.all(pend).then(function () {
+        var warp = (rec.prop && rec.prop.warp) || []
+        var persp = warp.filter(function (w) { return w.t === 'persp' })[0] || {}
+        var cyl = warp.filter(function (w) { return w.t === 'cyl' })[0] || {}
+        st.perspH = persp.kx || 0; st.perspV = persp.ky || 0; st.curve = cyl.curve || 0
+        st.fabric = typeof rec.fabric === 'number' ? rec.fabric : 0.8
+        st.contour = rec.contour > 0 ? rec.contour : 0
+        var pl = rec.place || {}
+        st.rot = pl.rot || 0; st.skewX = pl.skewX || 0; st.skewY = pl.skewY || 0
+        fitStage()
+        st.x = (pl.cx != null ? pl.cx : 0.5) * st.stageW
+        st.y = (pl.cy != null ? pl.cy : 0.5) * st.stageH
+        var ar = st.design.naturalWidth / st.design.naturalHeight // invert designSize() to recover scale
+        var frac = pl.w || 0.45
+        st.scale = ar >= 1 ? frac / 0.45 : frac / (0.45 * ar)
+        st.placed = true
+        if (!$('mkName').value.trim() && rec.prop && rec.prop.name) $('mkName').value = rec.prop.name
+        $('mkMapsInfo').textContent = Object.keys(st.maps).length ? 'loaded: ' + Object.keys(st.maps).join(', ') : ''
+        showStage(); syncControls(); render()
+        $('mkStatus').textContent = 'Restored “' + ((rec.prop && rec.prop.name) || 'prop') + '” — now swap the base photo, then Export.'
+      })
+    }).catch(function (e) { $('mkStatus').textContent = 'Import failed: ' + e.message })
+  }
+
   // Export the prop images (downscaled) + the FULL-RES design + a readable recipe, in one store-only .bmc bundle.
   function exportBundle() {
     if (!(st.base && st.design)) return
@@ -243,6 +307,7 @@
   $('mkOpen').addEventListener('click', function () { buildSliders(); modal.hidden = false })
   $('mkClose').addEventListener('click', function () { modal.hidden = true })
   modal.addEventListener('click', function (e) { if (e.target === modal) modal.hidden = true })
+  $('mkImport').addEventListener('change', function (e) { importBundle(e.target.files[0]); e.target.value = '' })
   $('mkProp').addEventListener('change', function (e) { onFile('base', e.target.files[0]) })
   $('mkDesign').addEventListener('change', function (e) { onFile('design', e.target.files[0]) })
   $('mkMask').addEventListener('change', function (e) { onFile('mask', e.target.files[0]) })
