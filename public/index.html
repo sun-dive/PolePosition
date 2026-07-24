@@ -669,7 +669,7 @@
         </div>
         <label class="dim" style="font-size:12px; margin-top:10px; display:block">Refine THIS image (keeps the composition)</label>
         <textarea id="artEditInstr" class="cover-prompt" rows="3" placeholder="e.g. make the background lighter; keep everything else the same"></textarea>
-        <div class="row" style="margin-top:6px; gap:8px; align-items:center"><button id="artEdit" class="ai-btn" type="button">✏️ Edit image</button><span id="artEditStatus" class="dim"></span></div>
+        <div class="row" style="margin-top:6px; gap:8px; align-items:center; flex-wrap:wrap"><button id="artEdit" class="ai-btn" type="button">✏️ Edit image</button><label class="dim" style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer" title="Each remake runs from the originally loaded/generated image, so edits don't compound. Uncheck to chain edits off the last result."><input id="artFromOrig" type="checkbox" checked> from original</label><button id="artRevert" class="ghost" type="button" title="Restore the originally loaded/generated image">↩ Original</button><span id="artEditStatus" class="dim"></span></div>
         </section>
         <section class="art-col">
         <div class="art-col-h">③ Animate</div>

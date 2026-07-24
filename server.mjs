@@ -260,7 +260,7 @@ async function falImage ({ prompt, model, aspectRatio, width, height, imageUrls,
           : { aspect_ratio: aspectRatio || '2:3' }) }
     : { prompt, image_size: { width: width || 1024, height: height || 1536 }, num_images: 1, enable_safety_checker: true }
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 180000)
+  const timer = setTimeout(() => ctrl.abort(), 300000) // 5 min — cold GPU starts / queue congestion on 2K–4K edits can exceed 3
   let res
   try {
     res = await fetch('https://fal.run/' + m, {

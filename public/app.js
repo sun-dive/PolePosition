@@ -2140,6 +2140,7 @@ $('pvAudio').addEventListener('timeupdate', () => {
 
 /* ---- Chapter art generator (P3 — reuses /api/image-prompt, /api/image, /api/save-image) ---- */
 let artData = ''
+let artOrig = '' // the last freshly loaded/generated image — edits source from this so remakes don't compound (and ↩ Original restores it)
 const ART_TEMPLATES = [
   ['Gold glow on charcoal (signature)', 'luminous illustration in warm gold and amber glowing on a deep charcoal near-black background, soft floating light particles and a gentle glow, flat shapes with subtle depth, premium and cinematic with a touch of magic, elegant and cohesive, no text'],
   ['Blue isometric tech', 'clean isometric flat-vector illustration on a deep blue and teal background, softly glowing accent icons arranged with subtle highlights and depth, a modern tech aesthetic, crisp and cohesive, no text'],
@@ -2186,6 +2187,7 @@ async function generateArt () {
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artStatus').textContent = data.error || ('Error ' + r.status); return }
     artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl)
+    artOrig = artData // fresh image → becomes the edit source
     $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = (crop ? 'Done (A4) — insert, refine, or regenerate.' : (px ? `Done (${px}×${px}) — insert, refine, or regenerate.` : 'Done — insert, refine, or regenerate.')) + masterNote(data.master)
   } catch (e) { $('artStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('artGen').disabled = false }
@@ -2195,8 +2197,10 @@ async function editArt () {
   const instr = $('artEditInstr').value.trim()
   if (!instr) { $('artEditStatus').textContent = 'Describe the change first.'; return }
   $('artEdit').disabled = true; $('artEditStatus').textContent = 'Editing… (can take 20–40s)'
+  // Source from the original (default) so repeated remakes don't compound; uncheck to chain edits off the last result.
+  const editSrc = ($('artFromOrig')?.checked && artOrig) ? artOrig : artData
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: artData, resolution: artRes() }) })
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: instr, image: editSrc, resolution: artRes() }) })
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('artEditStatus').textContent = data.error || ('Error ' + r.status); return }
     { const { px, crop } = parseShape($('artAspect').value); artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl) }
@@ -2377,7 +2381,7 @@ $('cropApply').onclick = () => {
   const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(sw)); c.height = Math.max(1, Math.round(sh))
   const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(cropImg, sx, sy, sw, sh, 0, 0, c.width, c.height)
-  artData = c.toDataURL('image/png')
+  artData = c.toDataURL('image/png'); artOrig = artData // the crop becomes the new edit source
   $('artImg').src = artData; $('artResult').hidden = false
   $('cropModal').hidden = true
   $('artStatus').textContent = 'Cropped to ' + c.width + 'x' + c.height + ' — Use as book cover, or insert.'
@@ -2401,11 +2405,15 @@ for (const _pid of ['artDesc', 'artPrompt', 'artEditInstr', 'artAnimPrompt']) {
   const _strip = () => { const v = _el.value.replace(/[ \t\r\n]+$/, ''); if (v !== _el.value) _el.value = v }
   _el.addEventListener('focus', _strip); _el.addEventListener('blur', _strip)
 }
+$('artRevert').onclick = () => {
+  if (!artOrig) { $('artEditStatus').textContent = 'No original loaded yet.'; return }
+  artData = artOrig; $('artImg').src = artData; $('artEditStatus').textContent = 'Restored the original.'
+}
 $('artOpen').onclick = () => $('artFile').click()
 $('artFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return
   const rd = new FileReader()
-  rd.onload = () => { artData = rd.result; $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = 'Image loaded — insert or refine it.' }
+  rd.onload = () => { artData = rd.result; artOrig = artData; $('artImg').src = artData; $('artResult').hidden = false; $('artStatus').textContent = 'Image loaded — insert or refine it.' }
   rd.readAsDataURL(f); e.target.value = ''
 }
 /* ---- Merge two images into one (nano-banana/edit multi-image composite) ---- */
@@ -2431,6 +2439,7 @@ $('mergeGo').onclick = async () => {
     const data = await r.json().catch(() => ({}))
     if (!r.ok) { $('mergeStatus').textContent = data.error || ('Error ' + r.status); return }
     artData = crop ? await cropToAspectDataUrl(data.dataUrl, crop[0], crop[1]) : (px ? await toSquareDataUrl(data.dataUrl, px) : data.dataUrl)
+    artOrig = artData // fresh merged image → becomes the edit source
     $('artImg').src = artData; $('artResult').hidden = false; $('mergeStatus').textContent = 'Merged — refine, crop, download, insert or animate below.' + masterNote(data.master)
   } catch (e) { $('mergeStatus').textContent = 'Request failed — is the server running? ' + e.message }
   finally { $('mergeGo').disabled = false }
