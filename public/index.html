@@ -453,7 +453,7 @@
   </div>
 
   <div id="mockupModal" class="modal" hidden>
-    <div class="modal-box" style="max-width:980px; width:96vw">
+    <div class="modal-box" style="max-width:980px; width:96vw; position:relative">
       <div class="modal-head"><b>🖼️ Product mockup</b><button id="mkClose" class="ghost" type="button">✕</button></div>
       <p class="dim" style="font-size:12px; margin:0 0 12px">Compose a design onto a reusable prop (mug, tee, tote…). The composite is never baked — the export is the prop's images + a tiny recipe (prop + design + placement) for PharLap to mint. One prop drives thousands of covers.</p>
       <div style="display:flex; gap:16px; flex-wrap:wrap">
@@ -471,6 +471,10 @@
           <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap">
             <label class="ghost" style="cursor:pointer">♻️ Reuse .bmc…<input id="mkImport" type="file" accept=".bmc,application/zip" hidden></label>
             <span class="dim" style="font-size:11px">restore a prop's geometry, then swap the base photo</span>
+          </div>
+          <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap">
+            <button id="mkCatalogue" class="ghost" type="button">🗂️ Prop catalogue…</button>
+            <span class="dim" style="font-size:11px">reuse a published prop — mint the design onto it</span>
           </div>
           <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap">
             <label class="ghost" style="cursor:pointer">🎨 Design…<input id="mkDesign" type="file" accept="image/*" hidden></label>
@@ -495,6 +499,17 @@
             <span id="mkStatus" class="dim" style="font-size:12px"></span>
           </div>
         </div>
+      </div>
+      <div id="catPanel" hidden style="position:absolute; inset:0; background:var(--panel,#12151b); border-radius:12px; padding:16px 18px; overflow:auto; z-index:5">
+        <div class="modal-head"><b>🗂️ Prop catalogue</b><button id="catClose" class="ghost" type="button">✕</button></div>
+        <p class="dim" style="font-size:12px; margin:2px 0 10px">Pick a published prop to reuse. Your design mints straight onto it — no new prop atom, no txid to copy.</p>
+        <div class="row" style="gap:8px; align-items:center; margin:0 0 12px; flex-wrap:wrap">
+          <input id="catDomain" class="title-in" style="flex:0 1 200px; margin:0" placeholder="nft.sale" value="nft.sale">
+          <button id="catLoad" class="ghost" type="button">↻ Load</button>
+          <label class="dim" style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer"><input id="catAll" type="checkbox"> show all ratios</label>
+          <span id="catStatus" class="dim" style="font-size:12px"></span>
+        </div>
+        <div id="catGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px"></div>
       </div>
     </div>
   </div>

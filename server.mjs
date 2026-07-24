@@ -828,6 +828,38 @@ const server = createServer(async (req, res) => {
     return sendJson(res, 200, { current: CURRENT, recent: RECENT, home: homedir(), lastRenderDir: LAST_RENDER_DIR, watermark: WM })
   }
 
+  // ── Prop catalogue: proxy a Big Red site's public props.json + base thumbnails so the mockup author can offer
+  // "choose a published prop → mint the design onto it". Server-side fetch dodges CORS; base images come back as
+  // data URLs (no canvas taint when composited/exported). Query: ?domain=nft.sale (default). ──
+  if (url.pathname === '/api/props' && req.method === 'GET') {
+    const domain = (url.searchParams.get('domain') || 'nft.sale').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
+    if (!/^[a-z0-9.-]+$/i.test(domain)) return sendJson(res, 400, { error: 'bad domain' })
+    const origin = 'https://' + domain
+    try {
+      const jr = await fetch(origin + '/props.json', { redirect: 'follow' })
+      if (!jr.ok) return sendJson(res, 502, { error: `props.json → ${jr.status} from ${domain}` })
+      const data = await jr.json().catch(() => null)
+      const list = data && Array.isArray(data.props) ? data.props : []
+      const out = []
+      for (const p of list) {
+        if (!p || !p.txid || !p.base) continue
+        let thumb = null
+        try {
+          const ir = await fetch(origin + '/' + String(p.base).replace(/^\/+/, ''))
+          if (ir.ok) {
+            const buf = Buffer.from(await ir.arrayBuffer())
+            const ct = ir.headers.get('content-type') || 'image/webp'
+            thumb = 'data:' + ct + ';base64,' + buf.toString('base64')
+          }
+        } catch { /* skip a broken thumbnail, keep the entry */ }
+        out.push({ txid: p.txid, name: p.name ?? null, ratio: p.ratio, place: p.place ?? null, warp: p.warp ?? null, fabric: p.fabric, contour: p.contour ?? null, thumb })
+      }
+      return sendJson(res, 200, { domain, props: out })
+    } catch (e) {
+      return sendJson(res, 502, { error: `could not reach ${domain}: ${e.message || 'error'}` })
+    }
+  }
+
   // ── Import a media atom from an on-chain mint: fetch → decrypt (Tier-1, keyless) → verify → archive ──
   // Body: { txid }.  Returns the decoded content + provenance so the UI can add it as an on-chain-referenced clip.
   if (url.pathname === '/api/import-mint' && req.method === 'POST') {

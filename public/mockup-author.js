@@ -16,6 +16,7 @@
     maps: {}, mapFiles: {},
     x: 0, y: 0, scale: 1, rot: 0, fabric: 0.8, curve: 0, skewX: 0, skewY: 0, perspV: 0, perspH: 0,
     stageW: 0, stageH: 0, placed: false,
+    propTxid: '', _seat: null, // propTxid set when reusing a published prop (catalogue); _seat = deferred normalized placement
   }
 
   function loadImage(file) {
@@ -138,15 +139,15 @@
       var input = $('mk_' + s[0]), out = $('mk_' + s[0] + 'v')
       if (input) { input.value = s[4]; s[6](s[4]); out.textContent = s[5](s[4]) }
     })
-    st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = false
+    st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = false; st.propTxid = ''; st._seat = null
     render()
   }
 
   function onFile(kind, file) {
     if (!file) return
     loadImage(file).then(function (img) {
-      if (kind === 'base') { st.base = img; st.baseFile = file; $('mkPropName').textContent = file.name; fitStage(); if (!st.placed) { st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = true } }
-      else if (kind === 'design') { st.design = img; st.designFile = file; $('mkDesignName').textContent = file.name; if (st.base && !st.placed) { st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = true } }
+      if (kind === 'base') { st.base = img; st.baseFile = file; st.propTxid = ''; st._seat = null; $('mkPropName').textContent = file.name; fitStage(); if (!st.placed) { st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = true } } // manual photo = fresh prop, not a catalogue reuse
+      else if (kind === 'design') { st.design = img; st.designFile = file; $('mkDesignName').textContent = file.name; if (st.base) { if (st._seat) seat(); else if (!st.placed) { st.x = st.stageW / 2; st.y = st.stageH / 2; st.placed = true } } }
       else { st.maps[kind] = img; st.mapFiles[kind] = file; $('mkMapsInfo').textContent = 'loaded: ' + Object.keys(st.maps).join(', ') }
       showStage(); render()
     }).catch(function (e) { $('mkStatus').textContent = e.message })
@@ -259,13 +260,103 @@
         var ar = st.design.naturalWidth / st.design.naturalHeight // invert designSize() to recover scale
         var frac = pl.w || 0.45
         st.scale = ar >= 1 ? frac / 0.45 : frac / (0.45 * ar)
-        st.placed = true
+        st.placed = true; st.propTxid = rec.propTxid || ''; st._seat = null // a catalogue-derived bundle can carry the reuse txid
         if (!$('mkName').value.trim() && rec.prop && rec.prop.name) $('mkName').value = rec.prop.name
         $('mkMapsInfo').textContent = Object.keys(st.maps).length ? 'loaded: ' + Object.keys(st.maps).join(', ') : ''
         showStage(); syncControls(); render()
         $('mkStatus').textContent = 'Restored “' + ((rec.prop && rec.prop.name) || 'prop') + '” — now swap the base photo, then Export.'
       })
     }).catch(function (e) { $('mkStatus').textContent = 'Import failed: ' + e.message })
+  }
+
+  // Apply a normalized placement (st._seat = {x,y,w}) to pixel coords. x/y need only the stage; scale needs the
+  // design's aspect (invert designSize). Idempotent — called on prop load and again when the design arrives.
+  function seat() {
+    if (!st._seat || !st.base) return
+    st.x = st._seat.x * st.stageW
+    st.y = st._seat.y * st.stageH
+    if (st.design) {
+      var ar = st.design.naturalWidth / st.design.naturalHeight
+      var frac = st._seat.w || 0.45
+      st.scale = ar >= 1 ? frac / 0.45 : frac / (0.45 * ar)
+    }
+    st.placed = true
+  }
+  function dataUrlToFile(durl, name) {
+    var m = /^data:([^;]+);base64,(.*)$/.exec(durl || '')
+    if (!m) return null
+    var bin = atob(m[2]), arr = new Uint8Array(bin.length)
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+    return new File([arr], name, { type: m[1] })
+  }
+  var RATIO_VALS = [1, 0.8, 2 / 3, 16 / 9, 9 / 16], RATIO_NAMES = ['1:1', '4:5', '2:3', '16:9', '9:16']
+  function nearestRatio(ar) {
+    var best = 0, bd = 1e9
+    for (var i = 0; i < RATIO_VALS.length; i++) { var d = Math.abs(ar - RATIO_VALS[i]); if (d < bd) { bd = d; best = i } }
+    return best
+  }
+
+  // Reuse a PUBLISHED prop (from the catalogue): restore its base (preview) + geometry + txid, so the design mints
+  // straight onto the on-chain prop — no new prop atom. e = { txid, name, ratio, place{x,y,scale,rot,skewX,skewY}, warp, fabric, contour, thumb }.
+  function loadCatalogueProp(e) {
+    var bf = dataUrlToFile(e.thumb, 'base.webp')
+    if (!bf) { $('mkStatus').textContent = 'That prop has no preview image.'; return }
+    loadImage(bf).then(function (img) {
+      st.base = img; st.baseFile = bf; st.propTxid = e.txid
+      $('mkPropName').textContent = (e.name || 'prop') + ' · reused ✓'
+      var w = Array.isArray(e.warp) ? e.warp : []
+      var persp = w.filter(function (s) { return s.t === 'persp' })[0] || {}
+      var cyl = w.filter(function (s) { return s.t === 'cyl' })[0] || {}
+      st.perspH = persp.kx || 0; st.perspV = persp.ky || 0; st.curve = cyl.curve || 0
+      st.fabric = typeof e.fabric === 'number' ? e.fabric : 0.8
+      st.contour = e.contour > 0 ? e.contour : 0
+      var pl = e.place || {}
+      st.rot = pl.rot || 0; st.skewX = pl.skewX || 0; st.skewY = pl.skewY || 0
+      st.maps = {}; st.mapFiles = {}
+      fitStage()
+      st._seat = { x: pl.x != null ? pl.x : 0.5, y: pl.y != null ? pl.y : 0.5, w: pl.scale != null ? pl.scale : 0.45 }
+      seat()
+      if (!$('mkName').value.trim() && e.name) $('mkName').value = e.name
+      showStage(); syncControls(); render()
+      $('mkStatus').textContent = st.design ? 'Prop reused — adjust or Export.' : 'Prop reused — now load a design (🎨), then Export.'
+    }).catch(function (err) { $('mkStatus').textContent = 'Could not load that prop: ' + err.message })
+  }
+
+  var catProps = []
+  function openCatalogue() { $('catPanel').hidden = false; if (!catProps.length) loadCatalogue() }
+  function closeCatalogue() { $('catPanel').hidden = true }
+  function loadCatalogue() {
+    var dom = ($('catDomain').value.trim() || 'nft.sale')
+    $('catStatus').textContent = 'Loading…'; $('catGrid').innerHTML = ''
+    fetch('/api/props?domain=' + encodeURIComponent(dom)).then(function (r) { return r.json() }).then(function (d) {
+      if (d.error) { $('catStatus').textContent = d.error; return }
+      catProps = Array.isArray(d.props) ? d.props : []
+      $('catStatus').textContent = catProps.length + ' prop' + (catProps.length === 1 ? '' : 's') + ' on ' + dom
+      renderCatalogue()
+    }).catch(function (e) { $('catStatus').textContent = 'Failed to reach the catalogue: ' + e.message })
+  }
+  function renderCatalogue() {
+    var grid = $('catGrid'); grid.innerHTML = ''
+    var showAll = $('catAll').checked
+    var want = (!showAll && st.design) ? nearestRatio(st.design.naturalWidth / st.design.naturalHeight) : null
+    var list = catProps.filter(function (p) { return want == null || p.ratio === want })
+    if (!list.length) {
+      grid.innerHTML = '<div class="dim" style="font-size:12px; grid-column:1/-1">' +
+        (want != null ? 'No props for this design’s ratio (' + RATIO_NAMES[want] + ') — tick “show all ratios”.' : 'No props found.') + '</div>'
+      return
+    }
+    list.forEach(function (p) {
+      var card = document.createElement('button'); card.type = 'button'
+      card.style.cssText = 'background:#0b0e13;border:1px solid var(--line,#33373f);border-radius:8px;padding:6px;cursor:pointer;display:flex;flex-direction:column;gap:4px;color:inherit;text-align:left'
+      var img = document.createElement('img'); img.src = p.thumb || ''; img.alt = p.name || 'prop'
+      img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:contain;background:#000;border-radius:4px'
+      var cap = document.createElement('div'); cap.style.cssText = 'font-size:11px;display:flex;justify-content:space-between;gap:4px;align-items:center'
+      var nm = document.createElement('span'); nm.textContent = p.name || 'prop'; nm.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+      var rt = document.createElement('span'); rt.textContent = RATIO_NAMES[p.ratio] || p.ratio; rt.style.color = '#ff7518'
+      cap.appendChild(nm); cap.appendChild(rt); card.appendChild(img); card.appendChild(cap)
+      card.addEventListener('click', function () { loadCatalogueProp(p); closeCatalogue() })
+      grid.appendChild(card)
+    })
   }
 
   // Export the prop images (downscaled) + the FULL-RES design + a readable recipe, in one store-only .bmc bundle.
@@ -294,6 +385,7 @@
         place: { cx: st.x / st.stageW, cy: st.y / st.stageH, w: s.w / st.stageW, h: s.h / st.stageH, rot: st.rot, skewX: st.skewX, skewY: st.skewY },
         fabric: st.fabric,
         contour: st.contour > 0 ? st.contour : undefined, // fold map auto-derived server-side; only the strength travels
+        propTxid: st.propTxid || undefined, // reuse a published prop → PharLap mints the design only, no new prop atom
       }
       entries.push({ name: 'mockup.json', bytes: new TextEncoder().encode(JSON.stringify(recipe, null, 2)) })
       var blob = makeZip(entries)
@@ -308,6 +400,10 @@
   $('mkClose').addEventListener('click', function () { modal.hidden = true })
   modal.addEventListener('click', function (e) { if (e.target === modal) modal.hidden = true })
   $('mkImport').addEventListener('change', function (e) { importBundle(e.target.files[0]); e.target.value = '' })
+  $('mkCatalogue').addEventListener('click', openCatalogue)
+  $('catClose').addEventListener('click', closeCatalogue)
+  $('catLoad').addEventListener('click', loadCatalogue)
+  $('catAll').addEventListener('change', renderCatalogue)
   $('mkProp').addEventListener('change', function (e) { onFile('base', e.target.files[0]) })
   $('mkDesign').addEventListener('change', function (e) { onFile('design', e.target.files[0]) })
   $('mkMask').addEventListener('change', function (e) { onFile('mask', e.target.files[0]) })
