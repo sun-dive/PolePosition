@@ -45,15 +45,42 @@
   }
 
   function warpStages() {
-    return [
+    var w = [
       { t: 'persp', kx: st.perspH, ky: st.perspV },
       { t: 'cyl', curve: st.curve, bow: 0.8 * st.curve, axis: 0 },
     ]
+    if (st.contour > 0 && st.maps.disp) w.push({ t: 'disp', str: st.contour }) // live-preview fabric contour
+    return w
+  }
+
+  // Derive a fabric-contour (displacement) map from the base's PRINT REGION, in-browser, for the live preview:
+  // crop the region → grayscale → high-pass (gray − blur + 128) = local fold structure centred on mid-gray. The
+  // curator re-derives the same thing server-side at mint; here it's just so the strength slider is WYSIWYG.
+  function deriveDisp(baseImg, box) {
+    var sx = baseImg.width / st.stageW, sy = baseImg.height / st.stageH
+    var cw = Math.max(1, Math.round(box.w * sx)), ch = Math.max(1, Math.round(box.h * sy))
+    var cx = Math.round(box.cx * sx - cw / 2), cy = Math.round(box.cy * sy - ch / 2)
+    var cv = document.createElement('canvas'); cv.width = cw; cv.height = ch
+    var c = cv.getContext('2d'); c.drawImage(baseImg, cx, cy, cw, ch, 0, 0, cw, ch)
+    var gray = c.getImageData(0, 0, cw, ch), gd = gray.data
+    for (var i = 0; i < gd.length; i += 4) { var l = gd[i] * 0.299 + gd[i + 1] * 0.587 + gd[i + 2] * 0.114; gd[i] = gd[i + 1] = gd[i + 2] = l }
+    c.putImageData(gray, 0, 0)
+    var bl = document.createElement('canvas'); bl.width = cw; bl.height = ch
+    var bc = bl.getContext('2d'); bc.filter = 'blur(' + Math.max(3, Math.round(cw * 0.03)) + 'px)'; bc.drawImage(cv, 0, 0); bc.filter = 'none'
+    var gg = gray.data, bb = bc.getImageData(0, 0, cw, ch).data
+    var out = document.createElement('canvas'); out.width = cw; out.height = ch
+    var oc = out.getContext('2d'), od = oc.createImageData(cw, ch)
+    for (var j = 0; j < od.data.length; j += 4) { var v = gg[j] - bb[j] + 128; v = v < 0 ? 0 : v > 255 ? 255 : v; od.data[j] = od.data[j + 1] = od.data[j + 2] = v; od.data[j + 3] = 255 }
+    oc.putImageData(od, 0, 0)
+    return out
   }
 
   function render(forExport) {
     if (!st.base) return
     var s = designSize()
+    // Auto fabric-contour: derive the fold map from the base's print region (unless the user uploaded a disp map).
+    if (st.design && st.contour > 0 && !st.mapFiles.disp) st.maps.disp = deriveDisp(st.base, { cx: st.x, cy: st.y, w: s.w, h: s.h })
+    else if (!st.mapFiles.disp && st.maps.disp) delete st.maps.disp
     R.renderCover(ctx, {
       base: st.base, design: st.design, maps: st.maps,
       stageW: st.stageW, stageH: st.stageH, dpr: dpr,
@@ -82,6 +109,7 @@
     ['rot', 'Rotation', -45, 45, 0, function (v) { return v + '°' }, function (v) { st.rot = v }],
     ['fabric', 'Shading', 0, 100, 80, function (v) { return v + '%' }, function (v) { st.fabric = v / 100 }],
     ['curve', 'Wrap curve', 0, 100, 0, function (v) { return v + '%' }, function (v) { st.curve = v / 100 }],
+    ['contour', 'Fabric contour', 0, 16, 0, function (v) { return v ? v + 'px' : 'off' }, function (v) { st.contour = v }],
     ['skewH', 'Skew ↔', -60, 60, 0, String, function (v) { st.skewX = v / 100 }],
     ['skewV', 'Skew ↕', -60, 60, 0, String, function (v) { st.skewY = v / 100 }],
     ['perspH', 'Perspective ↔', -80, 80, 0, String, function (v) { st.perspH = v / 100 }],
@@ -201,6 +229,7 @@
         designMime: dMime,
         place: { cx: st.x / st.stageW, cy: st.y / st.stageH, w: s.w / st.stageW, h: s.h / st.stageH, rot: st.rot, skewX: st.skewX, skewY: st.skewY },
         fabric: st.fabric,
+        contour: st.contour > 0 ? st.contour : undefined, // fold map auto-derived server-side; only the strength travels
       }
       entries.push({ name: 'mockup.json', bytes: new TextEncoder().encode(JSON.stringify(recipe, null, 2)) })
       var blob = makeZip(entries)
